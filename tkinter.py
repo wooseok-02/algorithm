@@ -4,6 +4,50 @@ import random
 from PIL import Image, ImageTk # Pillow 라이브러리에서 필요한 부분 가져오기
 
 # ----------------------------------------------------------------------
+# --- 4. 랭킹 창 관련 함수 (새로 추가) ---
+# ----------------------------------------------------------------------
+def open_ranking_window():
+    """랭킹 정보를 보여주는 새 창을 생성하는 함수"""
+    # Toplevel은 메인 창 위에 띄우는 보조 창을 만들 때 사용합니다.
+    ranking_win = tk.Toplevel()
+    ranking_win.title("🏆 게임 랭킹")
+    ranking_win.geometry("300x400")
+    ranking_win.resizable(False, False)
+
+    # 창 제목 라벨
+    title_label = tk.Label(ranking_win, text="랭킹 순위", font=("Dotum", 16, "bold"), pady=15)
+    title_label.pack()
+
+    # 랭킹 정보를 담을 프레임
+    ranking_frame = tk.Frame(ranking_win)
+    ranking_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+    # --- 예시 랭킹 데이터 ---
+    rankings = {
+        "1. Player1": "$ 9,500",
+        "2. Dealer": "$ 8,100",
+        "3. AcePlayer": "$ 7,650",
+        "4. Lucky7": "$ 6,200",
+        "5. CardMaster": "$ 5,150",
+    }
+
+    # 랭킹 데이터를 화면에 표시
+    for rank, (name, score) in enumerate(rankings.items(), 1):
+        # 1, 2, 3위는 메달 아이콘 추가
+        medal = ""
+        if rank == 1: medal = "🥇"
+        elif rank == 2: medal = "🥈"
+        elif rank == 3: medal = "🥉"
+        
+        rank_text = f"{medal} {name}: {score}"
+        rank_label = tk.Label(ranking_frame, text=rank_text, font=("Dotum", 12,), anchor="w")
+        rank_label.pack(fill="x", pady=2) # anchor='w'는 텍스트를 왼쪽으로 정렬
+
+    # 닫기 버튼
+    close_button = tk.Button(ranking_win, text="닫기", font=("Dotum", 10), command=ranking_win.destroy)
+    close_button.pack(pady=15)
+
+# ----------------------------------------------------------------------
 # --- 3. 게임 화면 관련 함수 ---
 # (이전과 동일)
 # ----------------------------------------------------------------------
@@ -37,7 +81,7 @@ def open_game_window():
             return self._label
 
     game_result_var = ResultVar(value="")
-    result_label = tk.Label(game_win, textvariable=game_result_var, font=("Arial", 60, "bold"), bg="#016D29", fg="white")
+    result_label = tk.Label(game_win, textvariable=game_result_var, font=("Dotum", 60, "bold"), bg="#016D29", fg="white")
     result_label.place(relx=0.5, rely=0.5, anchor="center")
     game_result_var.set_label(result_label)
 
@@ -48,22 +92,22 @@ def open_game_window():
     control_frame = tk.Frame(game_win, pady=20, bg="#016D29")
     control_frame.pack(side="bottom")
 
-    dealer_label = tk.Label(dealer_frame, text="딜러의 카드", font=("Arial", 12), fg="white", bg="#016D29")
+    dealer_label = tk.Label(dealer_frame, text="딜러의 카드", font=("Dotum", 12), fg="white", bg="#016D29")
     dealer_label.pack()
-    dealer_cards_label = tk.Label(dealer_frame, text="[카드 1] [?]", font=("Arial", 16, "bold"), pady=10, fg="white", bg="#016D29")
+    dealer_cards_label = tk.Label(dealer_frame, text="[카드 1] [?]", font=("Dotum", 16, "bold"), pady=10, fg="white", bg="#016D29")
     dealer_cards_label.pack()
     
-    player_label = tk.Label(player_frame, text="플레이어의 카드", font=("Arial", 12), fg="white", bg="#016D29")
+    player_label = tk.Label(player_frame, text="플레이어의 카드", font=("Dotum", 12), fg="white", bg="#016D29")
     player_label.pack()
-    player_cards_label = tk.Label(player_frame, text="[카드 1] [카드 2]", font=("Arial", 16, "bold"), pady=10, fg="white", bg="#016D29")
+    player_cards_label = tk.Label(player_frame, text="[카드 1] [카드 2]", font=("Dotum", 16, "bold"), pady=10, fg="white", bg="#016D29")
     player_cards_label.pack()
 
-    chip_label = tk.Label(control_frame, text="남은 칩: $1000", font=("Arial", 12), fg="white", bg="#016D29")
+    chip_label = tk.Label(control_frame, text="남은 칩: $1000", font=("Dotum", 12), fg="white", bg="#016D29")
     chip_label.pack(pady=10)
 
-    hit_button = tk.Button(control_frame, text="힛 (Hit)", font=("Arial", 14), width=10)
+    hit_button = tk.Button(control_frame, text="힛 (Hit)", font=("Dotum", 14), width=10)
     hit_button.pack(side="left", padx=10)
-    stand_button = tk.Button(control_frame, text="스탠드 (Stand)", font=("Arial", 14), width=10)
+    stand_button = tk.Button(control_frame, text="스탠드 (Stand)", font=("Dotum", 14), width=10)
     stand_button.pack(side="left", padx=10)
     
     hit_button.config(command=lambda: player_hit(game_result_var, hit_button, stand_button))
@@ -79,7 +123,8 @@ def start_game(main_window):
     open_game_window()
 
 def show_ranking():
-    messagebox.showinfo("랭킹", "랭킹 정보를 불러옵니다.")
+    """'랭킹 보기' 버튼을 누르면 팝업 대신 새 랭킹 창을 연다."""
+    open_ranking_window()
 
 def open_main_window():
     main_win = tk.Tk()
@@ -87,12 +132,12 @@ def open_main_window():
     main_win.geometry("1000x600")
     
     betting_amount = tk.StringVar(value="베팅 금액: $1000") 
-    betting_label = tk.Label(main_win, textvariable=betting_amount, font=("Arial", 14, "bold"), pady=20)
+    betting_label = tk.Label(main_win, textvariable=betting_amount, font=("Dotum", 14, "bold"), pady=20)
     betting_label.pack(pady=10)
-    start_button = tk.Button(main_win, text="게임 시작", font=("Arial", 12), width=20, height=2, command=lambda: start_game(main_win))
+    start_button = tk.Button(main_win, text="게임 시작", font=("Dotum", 12), width=20, height=2, command=lambda: start_game(main_win))
     start_button.pack(pady=10)
-    
-    ranking_button = tk.Button(main_win, text="랭킹 보기", font=("Arial", 12), width=20, height=2, command=show_ranking)
+
+    ranking_button = tk.Button(main_win, text="랭킹 보기", font=("Dotum", 12), width=20, height=2, command=show_ranking)
     ranking_button.pack(pady=10)
     main_win.mainloop()
 
@@ -118,7 +163,6 @@ if __name__ == "__main__":
     main_frame = tk.Frame(login_win, padx=20, pady=20)
     main_frame.pack(expand=True)
 
-
     # 사용자 이름 입력란 (row 번호가 1로 밀림)
     username_label = tk.Label(main_frame, text="사용자 이름:")
     username_label.grid(row=1, column=0, sticky="w", pady=5)
@@ -139,3 +183,4 @@ if __name__ == "__main__":
 
     login_win.bind('<Return>', attempt_login)
     login_win.mainloop()
+
