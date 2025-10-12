@@ -51,12 +51,26 @@ def open_ranking_window():
 # --- 3. 게임 화면 관련 함수 ---
 # (이전과 동일)
 # ----------------------------------------------------------------------
+
+def reset_game_state(result_var, player_cards_var, dealer_cards_var, hit_btn, stand_btn):
+    """게임 상태를 초기화하는 함수 (버튼 활성화, 텍스트 초기화 등)"""
+    # 1. 승/패/버스트 결과 텍스트를 지웁니다.
+    result_var.set("")
+    
+    # 2. 플레이어와 딜러의 카드를 초기 상태로 되돌립니다.
+    player_cards_var.set("[카드 1] [카드 2]")
+    dealer_cards_var.set("[카드 1] [?]")
+    
+    # 3. 비활성화되었던 '힛', '스탠드' 버튼을 다시 활성화합니다.
+    hit_btn.config(state="normal")
+    stand_btn.config(state="normal")
+
 def player_hit(result_var, hit_btn, stand_btn):
     if random.random() < 0.3:
         result_var.set("BUST")
         result_var.get_label().config(fg="orange")
-        hit_btn.config(state="abled")
-        stand_btn.config(state="abled")
+        hit_btn.config(state="disabled")
+        stand_btn.config(state="disabled")
 
 def player_stand(result_var, hit_btn, stand_btn):
     if random.random() < 0.5:
@@ -65,12 +79,12 @@ def player_stand(result_var, hit_btn, stand_btn):
     else:
         result_var.set("LOSE")
         result_var.get_label().config(fg="red")
-    hit_btn.config(state="abled")
-    stand_btn.config(state="abled")
+    hit_btn.config(state="disabled")
+    stand_btn.config(state="disabled")
 
 def open_game_window():
     game_win = tk.Tk()
-    game_win.title("BLACK JACK Game")
+    game_win.title("♠️ Blackjack Game")
     game_win.geometry("700x500")
     game_win.configure(bg="#016D29")
 
@@ -80,8 +94,14 @@ def open_game_window():
         def get_label(self):
             return self._label
 
+    # --- 실시간 변경을 위한 변수(StringVar)들 생성 ---
     game_result_var = ResultVar(value="")
-    result_label = tk.Label(game_win, textvariable=game_result_var, font=("Dotum", 60, "bold"), bg="#016D29", fg="white")
+    # ✨ 1. 카드 표시를 위한 StringVar 생성
+    player_cards_var = tk.StringVar(value="[카드 1] [카드 2]")
+    dealer_cards_var = tk.StringVar(value="[카드 1] [?]")
+    
+    # --- 위젯 배치 ---
+    result_label = tk.Label(game_win, textvariable=game_result_var, font=("Arial", 60, "bold"), bg="#016D29", fg="white")
     result_label.place(relx=0.5, rely=0.5, anchor="center")
     game_result_var.set_label(result_label)
 
@@ -92,26 +112,34 @@ def open_game_window():
     control_frame = tk.Frame(game_win, pady=20, bg="#016D29")
     control_frame.pack(side="bottom")
 
-    dealer_label = tk.Label(dealer_frame, text="딜러의 카드", font=("Dotum", 12), fg="white", bg="#016D29")
+    dealer_label = tk.Label(dealer_frame, text="딜러의 카드", font=("Arial", 12), fg="white", bg="#016D29")
     dealer_label.pack()
-    dealer_cards_label = tk.Label(dealer_frame, text="[카드 1] [?]", font=("Dotum", 16, "bold"), pady=10, fg="white", bg="#016D29")
+    # ✨ 2. 딜러 카드 라벨에 text 대신 textvariable 연결
+    dealer_cards_label = tk.Label(dealer_frame, textvariable=dealer_cards_var, font=("Arial", 16, "bold"), pady=10, fg="white", bg="#016D29")
     dealer_cards_label.pack()
     
-    player_label = tk.Label(player_frame, text="플레이어의 카드", font=("Dotum", 12), fg="white", bg="#016D29")
+    player_label = tk.Label(player_frame, text="플레이어의 카드", font=("Arial", 12), fg="white", bg="#016D29")
     player_label.pack()
-    player_cards_label = tk.Label(player_frame, text="[카드 1] [카드 2]", font=("Dotum", 16, "bold"), pady=10, fg="white", bg="#016D29")
+    # ✨ 2. 플레이어 카드 라벨에 text 대신 textvariable 연결
+    player_cards_label = tk.Label(player_frame, textvariable=player_cards_var, font=("Arial", 16, "bold"), pady=10, fg="white", bg="#016D29")
     player_cards_label.pack()
 
-    chip_label = tk.Label(control_frame, text="남은 칩: $1000", font=("Dotum", 12), fg="white", bg="#016D29")
+    chip_label = tk.Label(control_frame, text="남은 칩: $1000", font=("Arial", 12), fg="white", bg="#016D29")
     chip_label.pack(pady=10)
 
-    hit_button = tk.Button(control_frame, text="힛 (Hit)", font=("Dotum", 14), width=10)
+    hit_button = tk.Button(control_frame, text="힛 (Hit)", font=("Arial", 14), width=10)
     hit_button.pack(side="left", padx=10)
-    stand_button = tk.Button(control_frame, text="스탠드 (Stand)", font=("Dotum", 14), width=10)
+    stand_button = tk.Button(control_frame, text="스탠드 (Stand)", font=("Arial", 14), width=10)
     stand_button.pack(side="left", padx=10)
+    restart_button = tk.Button(control_frame, text="Restart", font=("Arial", 14), width=10)
+    restart_button.pack(side="left", padx=10)
     
+    # --- 버튼 기능 연결 ---
     hit_button.config(command=lambda: player_hit(game_result_var, hit_button, stand_button))
     stand_button.config(command=lambda: player_stand(game_result_var, hit_button, stand_button))
+    # ✨ 3. Restart 버튼의 command를 새 함수와 모든 필요 인자들로 연결
+    restart_button.config(command=lambda: reset_game_state(game_result_var, player_cards_var, dealer_cards_var, hit_button, stand_button))
+
     game_win.mainloop()
 
 # ----------------------------------------------------------------------
@@ -162,6 +190,7 @@ if __name__ == "__main__":
 
     main_frame = tk.Frame(login_win, padx=20, pady=20)
     main_frame.pack(expand=True)
+
 
     # 사용자 이름 입력란 (row 번호가 1로 밀림)
     username_label = tk.Label(main_frame, text="사용자 이름:")
