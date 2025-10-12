@@ -84,13 +84,14 @@ def show_ranking():
 def open_main_window():
     main_win = tk.Tk()
     main_win.title("BLACK JACK 메인 화면")
-    main_win.geometry("400x300")
+    main_win.geometry("1000x600")
     
     betting_amount = tk.StringVar(value="베팅 금액: $1000") 
     betting_label = tk.Label(main_win, textvariable=betting_amount, font=("Arial", 14, "bold"), pady=20)
     betting_label.pack(pady=10)
     start_button = tk.Button(main_win, text="게임 시작", font=("Arial", 12), width=20, height=2, command=lambda: start_game(main_win))
     start_button.pack(pady=10)
+    
     ranking_button = tk.Button(main_win, text="랭킹 보기", font=("Arial", 12), width=20, height=2, command=show_ranking)
     ranking_button.pack(pady=10)
     main_win.mainloop()
@@ -101,7 +102,7 @@ def open_main_window():
 def attempt_login(event=None):
     username = username_entry.get()
     password = password_entry.get()
-    if username == "py" and password == "1234":
+    if username == "" and password == "":
         messagebox.showinfo("로그인 성공", f"{username}님, 환영합니다!")
         login_win.destroy()
         open_main_window()
@@ -117,17 +118,6 @@ if __name__ == "__main__":
     main_frame = tk.Frame(login_win, padx=20, pady=20)
     main_frame.pack(expand=True)
 
-    # --- ✨ 이미지 추가 시작 ✨ ---
-    # 1. 이미지 파일 열기
-    image = Image.open("lock_icon.png")
-    # 2. 이미지 크기 조절
-    image = image.resize((300, 150), Image.LANCZOS)
-    # 3. Tkinter에서 사용할 수 있는 이미지 객체로 변환
-    photo = ImageTk.PhotoImage(image)
-    # 4. 이미지를 표시할 라벨 생성 및 배치
-    image_label = tk.Label(main_frame, image=photo)
-    image_label.grid(row=0, column=0, columnspan=2, pady=10) # 맨 위에 배치
-    # --- ✨ 이미지 추가 끝 ✨ ---
 
     # 사용자 이름 입력란 (row 번호가 1로 밀림)
     username_label = tk.Label(main_frame, text="사용자 이름:")
