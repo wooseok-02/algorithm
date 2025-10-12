@@ -6,6 +6,59 @@ from PIL import Image, ImageTk # Pillow 라이브러리에서 필요한 부분 �
 # ----------------------------------------------------------------------
 # --- 4. 랭킹 창 관련 함수 (새로 추가) ---
 # ----------------------------------------------------------------------
+def confirm_bet(bet_entry, betting_win, main_win):
+    """베팅 금액을 확정하고 게임 창으로 넘어가는 함수"""
+    bet_amount = bet_entry.get()
+    
+    # TODO: 입력된 금액이 유효한 숫자인지 확인하는 로직 추가 필요
+    if bet_amount.isdigit() and int(bet_amount) > 0:
+        print(f"베팅 금액: ${bet_amount}") # 나중에 이 값을 게임 창으로 넘겨주면 됩니다.
+        
+        betting_win.destroy()    # 베팅 창 닫기
+        main_win.destroy()       # 메인 메뉴 창 닫기
+        open_game_window()       # 게임 화면 열기
+    else:
+        messagebox.showwarning("입력 오류", "올바른 숫자를 입력해주세요.")
+
+
+def open_betting_window(main_win):
+    """베팅 금액을 입력받는 새 창을 생성하는 함수"""
+    betting_win = tk.Toplevel(main_win)
+    betting_win.title("베팅")
+    betting_win.geometry("250x150")
+    betting_win.resizable(False, False)
+
+    # 창을 부모 창(메인 메뉴) 중앙에 위치시키기
+    main_win_x = main_win.winfo_x()
+    main_win_y = main_win.winfo_y()
+    main_win_width = main_win.winfo_width()
+    main_win_height = main_win.winfo_height()
+    betting_win_width = 250
+    betting_win_height = 150
+    
+    pos_x = main_win_x + (main_win_width // 2) - (betting_win_width // 2)
+    pos_y = main_win_y + (main_win_height // 2) - (betting_win_height // 2)
+    
+    betting_win.geometry(f"{betting_win_width}x{betting_win_height}+{pos_x}+{pos_y}")
+
+    label = tk.Label(betting_win, text="베팅할 금액을 입력하세요", font=("Dotum", 10))
+    label.pack(pady=20)
+
+    bet_entry = tk.Entry(betting_win, font=("Dotum", 10))
+    bet_entry.pack(pady=5)
+    bet_entry.focus_set() # 창이 열리면 바로 입력할 수 있도록 포커스 설정
+
+    confirm_button = tk.Button(
+        betting_win, 
+        text="확인", 
+        font=("Dotum", 10), 
+        command=lambda: confirm_bet(bet_entry, betting_win, main_win)
+    )
+    confirm_button.pack(pady=10)
+    
+    # Enter 키를 눌러도 확인 버튼이 작동하도록 설정
+    betting_win.bind('<Return>', lambda event: confirm_bet(bet_entry, betting_win, main_win))
+
 def open_ranking_window():
     """랭킹 정보를 보여주는 새 창을 생성하는 함수"""
     # Toplevel은 메인 창 위에 띄우는 보조 창을 만들 때 사용합니다.
@@ -24,11 +77,9 @@ def open_ranking_window():
 
     # --- 예시 랭킹 데이터 ---
     rankings = {
-        "1. Player1": "$ 9,500",
-        "2. Dealer": "$ 8,100",
-        "3. AcePlayer": "$ 7,650",
-        "4. Lucky7": "$ 6,200",
-        "5. CardMaster": "$ 5,150",
+        "1. Player1": "$ 10,000",
+        "2. Dealer": "$ 8,000",
+        "3. AcePlayer": "$ 7,000",
     }
 
     # 랭킹 데이터를 화면에 표시
@@ -96,48 +147,53 @@ def open_game_window():
 
     # --- 실시간 변경을 위한 변수(StringVar)들 생성 ---
     game_result_var = ResultVar(value="")
-    # ✨ 1. 카드 표시를 위한 StringVar 생성
     player_cards_var = tk.StringVar(value="[카드 1] [카드 2]")
     dealer_cards_var = tk.StringVar(value="[카드 1] [?]")
     
-    # --- 위젯 배치 ---
-    result_label = tk.Label(game_win, textvariable=game_result_var, font=("Arial", 60, "bold"), bg="#016D29", fg="white")
+    # --- 결과(WIN/LOSE/BUST) 표시 라벨 ---
+    result_label = tk.Label(game_win, textvariable=game_result_var, font=("Dotum", 60, "bold"), bg="#016D29", fg="white")
     result_label.place(relx=0.5, rely=0.5, anchor="center")
     game_result_var.set_label(result_label)
 
+    # --- 화면 영역 프레임 생성 (위젯들을 담을 보이지 않는 틀) ---
     dealer_frame = tk.Frame(game_win, pady=10, bg="#016D29")
-    dealer_frame.pack()
     player_frame = tk.Frame(game_win, pady=10, bg="#016D29")
-    player_frame.pack()
     control_frame = tk.Frame(game_win, pady=20, bg="#016D29")
+    
+    # --- ✨ 레이아웃 배치 순서 변경 ✨ ---
+    # 1. 컨트롤 프레임(버튼 영역)을 창의 맨 아래쪽에 붙입니다.
     control_frame.pack(side="bottom")
+    # 2. 플레이어 프레임(카드 영역)을 그 다음에 아래쪽에 붙입니다 (컨트롤 프레임 바로 위).
+    player_frame.pack(side="bottom")
+    # 3. 딜러 프레임을 맨 위쪽에 붙입니다.
+    dealer_frame.pack(side="top")
 
-    dealer_label = tk.Label(dealer_frame, text="딜러의 카드", font=("Arial", 12), fg="white", bg="#016D29")
+    # --- 딜러 카드 위젯 ---
+    dealer_label = tk.Label(dealer_frame, text="딜러의 카드", font=("Dotum", 12), fg="white", bg="#016D29")
     dealer_label.pack()
-    # ✨ 2. 딜러 카드 라벨에 text 대신 textvariable 연결
-    dealer_cards_label = tk.Label(dealer_frame, textvariable=dealer_cards_var, font=("Arial", 16, "bold"), pady=10, fg="white", bg="#016D29")
+    dealer_cards_label = tk.Label(dealer_frame, textvariable=dealer_cards_var, font=("Dotum", 16, "bold"), pady=10, fg="white", bg="#016D29")
     dealer_cards_label.pack()
     
-    player_label = tk.Label(player_frame, text="플레이어의 카드", font=("Arial", 12), fg="white", bg="#016D29")
+    # --- 플레이어 카드 위젯 ---
+    player_label = tk.Label(player_frame, text="플레이어의 카드", font=("Dotum", 12), fg="white", bg="#016D29")
     player_label.pack()
-    # ✨ 2. 플레이어 카드 라벨에 text 대신 textvariable 연결
-    player_cards_label = tk.Label(player_frame, textvariable=player_cards_var, font=("Arial", 16, "bold"), pady=10, fg="white", bg="#016D29")
+    player_cards_label = tk.Label(player_frame, textvariable=player_cards_var, font=("Dotum", 16, "bold"), pady=10, fg="white", bg="#016D29")
     player_cards_label.pack()
 
-    chip_label = tk.Label(control_frame, text="남은 칩: $1000", font=("Arial", 12), fg="white", bg="#016D29")
+    # --- 컨트롤 버튼 위젯 ---
+    chip_label = tk.Label(control_frame, text="남은 칩: $100000", font=("Dotum", 12), fg="white", bg="#016D29")
     chip_label.pack(pady=10)
 
-    hit_button = tk.Button(control_frame, text="힛 (Hit)", font=("Arial", 14), width=10)
+    hit_button = tk.Button(control_frame, text="힛 (Hit)", font=("Dotum", 14), width=10)
     hit_button.pack(side="left", padx=10)
-    stand_button = tk.Button(control_frame, text="스탠드 (Stand)", font=("Arial", 14), width=10)
+    stand_button = tk.Button(control_frame, text="스탠드 (Stand)", font=("Dotum", 14), width=13)
     stand_button.pack(side="left", padx=10)
-    restart_button = tk.Button(control_frame, text="Restart", font=("Arial", 14), width=10)
+    restart_button = tk.Button(control_frame, text="다시하기 (Restart)", font=("Dotum", 14), width=15)
     restart_button.pack(side="left", padx=10)
     
     # --- 버튼 기능 연결 ---
     hit_button.config(command=lambda: player_hit(game_result_var, hit_button, stand_button))
     stand_button.config(command=lambda: player_stand(game_result_var, hit_button, stand_button))
-    # ✨ 3. Restart 버튼의 command를 새 함수와 모든 필요 인자들로 연결
     restart_button.config(command=lambda: reset_game_state(game_result_var, player_cards_var, dealer_cards_var, hit_button, stand_button))
 
     game_win.mainloop()
@@ -147,8 +203,9 @@ def open_game_window():
 # (이전과 동일)
 # ----------------------------------------------------------------------
 def start_game(main_window):
-    main_window.destroy()
-    open_game_window()
+    """'게임 시작' 버튼을 누르면 베팅 창을 연다."""
+    open_betting_window(main_window)
+    
 
 def show_ranking():
     """'랭킹 보기' 버튼을 누르면 팝업 대신 새 랭킹 창을 연다."""
@@ -159,7 +216,7 @@ def open_main_window():
     main_win.title("BLACK JACK 메인 화면")
     main_win.geometry("1000x600")
     
-    betting_amount = tk.StringVar(value="베팅 금액: $1000") 
+    betting_amount = tk.StringVar(value="베팅 금액: $100000") 
     betting_label = tk.Label(main_win, textvariable=betting_amount, font=("Dotum", 14, "bold"), pady=20)
     betting_label.pack(pady=10)
     start_button = tk.Button(main_win, text="게임 시작", font=("Dotum", 12), width=20, height=2, command=lambda: start_game(main_win))
