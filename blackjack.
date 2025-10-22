@@ -1,305 +1,11 @@
 import tkinter as tk
 from tkinter import messagebox
-import random
-from PIL import Image, ImageTk, ImageDraw, ImageFont
 import ctypes
 
 # =========================
-# 고해상도 DPI 지원
+# 고해상도 DPI 지원 (Windows 전용)
 # =========================
 ctypes.windll.shcore.SetProcessDpiAwareness(1)
-
-# =========================
-# 카드 이미지 생성
-# =========================
-def create_card_image(rank, suit):
-    width, height = 120, 180
-    img = Image.new("RGB", (width, height), "white")
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([0,0,width-1,height-1], outline="black", width=2)
-    color = "red" if suit in ["♥","♦"] else "black"
-    try:
-        font = ImageFont.truetype("arial.ttf",36)
-    except:
-        font = ImageFont.load_default()
-    text = f"{rank}{suit}"
-    bbox = draw.textbbox((0,0), text, font=font)
-    w = bbox[2]-bbox[0]
-    h = bbox[3]-bbox[1]
-    draw.text(((width-w)/2,(height-h)/2), text, fill=color, font=font)
-    return ImageTk.PhotoImage(img)
-
-# =========================
-# 카드 로직
-# =========================
-def deal_card():
-    ranks = ['A','2','3','4','5','6','7','8','9','10','J','Q','K']
-    suits = ['♠','♥','♦','♣']
-    return random.choice(ranks), random.choice(suits)
-
-def calculate_score(hand):
-    values = {'A':11,'J':10,'Q':10,'K':10,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10}
-    score = sum(values[r] for r,s in hand)
-    ace_count = sum(1 for r,s in hand if r=='A')
-    while score>21 and ace_count>0:
-        score -= 10
-        ace_count -= 1
-    return score
-
-# =========================
-# 블랙잭 GUI
-# =========================
-class BlackjackGUI:
-    def __init__(self, root, main_window, bet_amount):
-        self.main_window = main_window
-        self.chips = main_window.chips
-        self.bet = bet_amount
-        self.game_active = False
-        self.player_hand = []
-        self.dealer_hand = []
-
-        self.root = tk.Toplevel(root)
-        self.root.title("♠️ Blackjack Game")
-        self.root.geometry("1286x886")
-        self.root.configure(bg="green")
-
-        # 메인 화면 버튼
-        self.main_menu_button = tk.Button(self.root, text="메인 화면으로", command=self.back_to_main, width=11, height=2, font=("Arial",7,"bold"))
-        self.main_menu_button.place(x=3, y=3)
-
-        # 딜러 카드 프레임
-        self.dealer_frame = tk.LabelFrame(self.root, text="딜러", font=("Arial",16,"bold"), fg="white", bg="green", labelanchor="n")
-        self.dealer_frame.pack(fill="x", padx=20, pady=(50,10))
-        self.dealer_inner_frame = tk.Frame(self.dealer_frame, bg="green")
-        self.dealer_inner_frame.pack(pady=10)
-
-        # 상태 표시
-        self.status_label = tk.Label(self.root, text="", bg="green", fg="yellow", font=("Arial",20,"bold"))
-        self.status_label.pack(pady=15)
-
-        # 플레이어 카드 프레임
-        self.player_frame = tk.LabelFrame(self.root, text="플레이어", font=("Arial",16,"bold"), fg="white", bg="green", labelanchor="n")
-        self.player_frame.pack(fill="x", padx=20, pady=(10,0))
-        self.player_inner_frame = tk.Frame(self.player_frame, bg="green")
-        self.player_inner_frame.pack(pady=10)
-
-        # 남은 돈 표시
-        self.chip_label = tk.Label(self.root, text=f"남은 돈: ${self.chips}", bg="green", fg="white", font=("Arial",16,"bold"))
-        self.chip_label.pack(pady=10)
-
-        # =========================
-        # 버튼 프레임
-        # =========================
-        self.button_frame = tk.Frame(self.root, bg="green")
-        self.button_frame.pack(pady=20)
-
-        btn_width = 15
-        btn_height = 2
-        btn_font = ("Arial", 10, "bold")
-        shortcut_font = ("Arial", 12, "bold")
-
-        # 더블다운
-        self.dd_button = tk.Button(self.button_frame, text="더블다운", command=self.double_down,
-                                   width=btn_width, height=btn_height, font=btn_font)
-        self.dd_button.grid(row=0, column=0, padx=30)
-        tk.Label(self.button_frame, text="(A)", font=shortcut_font, bg="green", fg="white").grid(row=1, column=0)
-
-        # 스플릿
-        self.split_button = tk.Button(self.button_frame, text="스플릿", command=self.split_hand,
-                                      width=btn_width, height=btn_height, font=btn_font)
-        self.split_button.grid(row=0, column=1, padx=30)
-        tk.Label(self.button_frame, text="(S)", font=shortcut_font, bg="green", fg="white").grid(row=1, column=1)
-
-        # 스탠드
-        self.stand_button = tk.Button(self.button_frame, text="스탠드", command=self.stand,
-                                      width=btn_width, height=btn_height, font=btn_font)
-        self.stand_button.grid(row=0, column=2, padx=30)
-        tk.Label(self.button_frame, text="(D)", font=shortcut_font, bg="green", fg="white").grid(row=1, column=2)
-
-        # 히트
-        self.hit_button = tk.Button(self.button_frame, text="히트", command=self.hit,
-                                    width=btn_width, height=btn_height, font=btn_font)
-        self.hit_button.grid(row=0, column=3, padx=30)
-        tk.Label(self.button_frame, text="(F)", font=shortcut_font, bg="green", fg="white").grid(row=1, column=3)
-
-        # 다시하기
-        self.restart_button = tk.Button(self.button_frame, text="다시하기", command=self.restart,
-                                        width=btn_width, height=btn_height, font=btn_font)
-        self.restart_button.grid(row=0, column=4, padx=30)
-        tk.Label(self.button_frame, text="(R)", font=shortcut_font, bg="green", fg="white").grid(row=1, column=4)
-
-        # 초기 버튼 상태
-        self.restart_button.config(state="disabled")
-        self.dd_button.config(state="disabled")
-        self.split_button.config(state="disabled")
-        self.stand_button.config(state="disabled")
-        self.hit_button.config(state="disabled")
-
-        # 단축키 바인딩
-        self.root.bind("a", lambda e: self.double_down() if self.game_active else None)
-        self.root.bind("s", lambda e: self.split_hand() if self.game_active else None)
-        self.root.bind("d", lambda e: self.stand() if self.game_active else None)
-        self.root.bind("f", lambda e: self.hit() if self.game_active else None)
-        self.root.bind("r", lambda e: self.restart() if not self.hit_button['state']=="normal" else None)
-        self.root.bind("m", lambda e: self.back_to_main())
-
-        self.restart()
-
-    # =========================
-    # 게임 초기화
-    # =========================
-    def restart(self):
-        self.game_active = True
-        self.player_hand = [deal_card(), deal_card()]
-        self.dealer_hand = [deal_card(), deal_card()]
-
-        # 블랙잭 체크
-        if calculate_score(self.player_hand) == 21:
-            self.status_label.config(text="블랙잭입니다! 🎉 축하합니다!")
-            self.hit_button.config(state="disabled")
-            self.stand_button.config(state="disabled")
-            self.dd_button.config(state="disabled")
-            self.split_button.config(state="disabled")
-            self.update_display(reveal_dealer=True)
-            self.end_game("블랙잭 승리!🎉")
-            return
-
-        self.status_label.config(text="당신의 차례! Hit 또는 Stand 선택")
-        self.hit_button.config(state="normal")
-        self.stand_button.config(state="normal")
-        self.dd_button.config(state="normal")
-        self.split_button.config(state="normal" if self.can_split(self.player_hand) else "disabled")
-        self.restart_button.config(state="disabled")
-        self.update_display()
-
-    # =========================
-    # 카드 화면 업데이트
-    # =========================
-    def update_display(self, reveal_dealer=False):
-        for widget in self.player_inner_frame.winfo_children():
-            widget.destroy()
-        for widget in self.dealer_inner_frame.winfo_children():
-            widget.destroy()
-
-        # 플레이어 카드
-        for card in self.player_hand:
-            img = create_card_image(*card)
-            lbl = tk.Label(self.player_inner_frame, image=img, bg="green")
-            lbl.image = img
-            lbl.pack(side="left", padx=8)
-
-        # 딜러 카드
-        if not reveal_dealer and self.game_active:
-            img_first = create_card_image(*self.dealer_hand[0])
-            lbl_first = tk.Label(self.dealer_inner_frame, image=img_first, bg="green")
-            lbl_first.image = img_first
-            lbl_first.pack(side="left", padx=8)
-            back = Image.new("RGB",(120,180),"gray")
-            img_back = ImageTk.PhotoImage(back)
-            lbl_back = tk.Label(self.dealer_inner_frame, image=img_back, bg="green")
-            lbl_back.image = img_back
-            lbl_back.pack(side="left", padx=8)
-        else:
-            for card in self.dealer_hand:
-                img = create_card_image(*card)
-                lbl = tk.Label(self.dealer_inner_frame, image=img, bg="green")
-                lbl.image = img
-                lbl.pack(side="left", padx=8)
-
-    # =========================
-    # 게임 종료 처리
-    # =========================
-    def end_game(self, result):
-        self.game_active = False
-        self.update_display(reveal_dealer=True)
-
-        if result.startswith("승리"):
-            self.status_label.config(text=f"🎉 {result}! +${self.bet}")
-            self.chips += self.bet
-        elif result=="패배":
-            self.status_label.config(text=f"💀 패배! -${self.bet}")
-            self.chips -= self.bet
-        else:
-            self.status_label.config(text="😐 푸시! 이번판은 무효입니다!")
-
-        # ✅ 메인 화면 chips와 라벨 동기화
-        self.main_window.chips = self.chips
-        self.main_window.update_chip_label()
-        self.chip_label.config(text=f"남은 돈: ${self.chips}")
-
-        self.hit_button.config(state="disabled")
-        self.stand_button.config(state="disabled")
-        self.dd_button.config(state="disabled")
-        self.split_button.config(state="disabled")    
-        self.restart_button.config(state="normal")
-
-        if self.chips <= 0:
-            messagebox.showinfo("게임 종료", "돈이 모두 소진되었습니다. 메인 화면으로 돌아갑니다.")
-            self.back_to_main()
-
-    # =========================
-    # 버튼 기능
-    # =========================
-    def hit(self):
-        self.player_hand.append(deal_card())
-        self.update_display()
-        if calculate_score(self.player_hand) > 21:
-            self.end_game("패배")
-
-    def stand(self):
-        while calculate_score(self.dealer_hand)<17:
-            self.dealer_hand.append(deal_card())
-        self.update_display(reveal_dealer=True)
-        player_score = calculate_score(self.player_hand)
-        dealer_score = calculate_score(self.dealer_hand)
-
-        if dealer_score>21 or player_score>dealer_score:
-            self.end_game("승리")
-        elif dealer_score==player_score:
-            self.end_game("푸시")
-        else:
-            self.end_game("패배")
-
-    def double_down(self):
-        self.bet *= 2
-        self.player_hand.append(deal_card())
-        self.update_display()
-        self.stand()
-
-    def split_hand(self):
-        if self.can_split(self.player_hand):
-            messagebox.showinfo("스플릿", "스플릿 기능 실행 (단순화)")
-        else:
-            messagebox.showwarning("스플릿 불가", "같은 카드가 두 장 있어야 합니다.")
-
-    def can_split(self, hand):
-        return len(hand)==2 and hand[0][0]==hand[1][0]
-
-    def back_to_main(self):
-        self.root.destroy()
-        self.main_window.deiconify()
-
-# =========================
-# 랭킹창
-# =========================
-def open_ranking_window():
-    ranking_win = tk.Toplevel()
-    ranking_win.title("🏆 게임 랭킹")
-    ranking_win.geometry("300x400")
-    ranking_win.resizable(False, False)
-    tk.Label(ranking_win, text="랭킹 순위", font=("Dotum",16,"bold"), pady=15).pack()
-    rankings = {
-        "1. Player1":"$9,500",
-        "2. Dealer":"$8,100",
-        "3. AcePlayer":"$7,650",
-        "4. Lucky7":"$6,200",
-        "5. CardMaster":"$5,150"
-    }
-    for rank, (name, score) in enumerate(rankings.items(),1):
-        medal = "🥇" if rank==1 else "🥈" if rank==2 else "🥉" if rank==3 else ""
-        text = f"{medal} {name}: {score}"
-        tk.Label(ranking_win, text=text, font=("Dotum",12), anchor="w").pack(fill="x", pady=2)
-    tk.Button(ranking_win, text="닫기", command=ranking_win.destroy).pack(pady=15)
 
 # =========================
 # 메인 메뉴
@@ -323,53 +29,86 @@ class MainMenu(tk.Tk):
         self.bet_entry.pack(side="left", padx=5)
         self.bet_entry.insert(0,"1000")
 
-        self.charge_button = tk.Button(frame, text="돈 충전", font=("Dotum",10), command=self.charge_chips)
+        self.charge_button = tk.Button(frame, text="돈 충전", font=("Dotum",10))
         self.charge_button.pack(side="left", padx=5)
-        self.update_charge_button()
 
-        tk.Button(self, text="게임 시작", font=("Dotum",14), width=20, height=2, command=self.start_game).pack(pady=10)
-        tk.Button(self, text="랭킹 보기", font=("Dotum",14), width=20, height=2, command=open_ranking_window).pack(pady=10)
+        tk.Button(self, text="게임 시작", font=("Dotum",14), width=20, height=2).pack(pady=10)
+        tk.Button(self, text="랭킹 보기", font=("Dotum",14), width=20, height=2).pack(pady=10)
 
-    def start_game(self):
-        bet = int(self.bet_entry.get())
-        if bet > self.chips:
-            messagebox.showwarning("베팅 오류", "보유 돈보다 큰 금액은 베팅할 수 없습니다.")
-            return
-        self.withdraw()
-        BlackjackGUI(self, self, bet)
+# =========================
+# 블랙잭 GUI (빈 틀만)
+# =========================
+class BlackjackGUI:
+    def __init__(self, root, main_window, bet_amount):
+        self.main_window = main_window
+        self.chips = main_window.chips
+        self.bet = bet_amount
 
-    def update_chip_label(self):
-        self.chip_label.config(text=f"보유 돈: ${self.chips}")
-        self.update_charge_button()
+        self.root = tk.Toplevel(root)
+        self.root.title("♠️ Blackjack Game")
+        self.root.geometry("1286x886")
+        self.root.configure(bg="green")
 
-    def charge_chips(self):
-        if self.chips >= 5000:
-            messagebox.showinfo("충전 불가", "보유 돈이 5,000 이상이므로 충전할 수 없습니다.")
-        elif self.chips <= 3000:
-            self.chips = 5000
-            self.update_chip_label()
-            messagebox.showinfo("충전 완료", "보유 돈이 5,000으로 충전되었습니다.")
+        # 메인 화면 버튼
+        self.main_menu_button = tk.Button(self.root, text="메인 화면으로", width=11, height=2, font=("Arial",7,"bold"))
+        self.main_menu_button.place(x=3, y=3)
 
-    def update_charge_button(self):
-        if self.chips >= 5000:
-            self.charge_button.config(state="disabled")
-        elif self.chips <= 3000:
-            self.charge_button.config(state="normal")
-        else:
-            self.charge_button.config(state="disabled")
+        # 딜러 카드 프레임
+        self.dealer_frame = tk.LabelFrame(self.root, text="딜러", font=("Arial",16,"bold"), fg="white", bg="green", labelanchor="n")
+        self.dealer_frame.pack(fill="x", padx=20, pady=(50,10))
+        self.dealer_inner_frame = tk.Frame(self.dealer_frame, bg="green")
+        self.dealer_inner_frame.pack(pady=10)
 
-# =========================ㄹ
+        # 상태 표시
+        self.status_label = tk.Label(self.root, text="", bg="green", fg="yellow", font=("Arial",20,"bold"))
+        self.status_label.pack(pady=15)
+
+        # 플레이어 카드 프레임
+        self.player_frame = tk.LabelFrame(self.root, text="플레이어", font=("Arial",16,"bold"), fg="white", bg="green", labelanchor="n")
+        self.player_frame.pack(fill="x", padx=20, pady=(10,0))
+        self.player_inner_frame = tk.Frame(self.player_frame, bg="green")
+        self.player_inner_frame.pack(pady=10)
+
+        # 남은 돈 표시
+        self.chip_label = tk.Label(self.root, text=f"남은 돈: ${self.chips}", bg="green", fg="white", font=("Arial",16,"bold"))
+        self.chip_label.pack(pady=10)
+
+        # 버튼 프레임
+        self.button_frame = tk.Frame(self.root, bg="green")
+        self.button_frame.pack(pady=20)
+
+        btn_width = 15
+        btn_height = 2
+        btn_font = ("Arial", 10, "bold")
+
+        # 더블다운
+        tk.Button(self.button_frame, text="더블다운", width=btn_width, height=btn_height, font=btn_font).grid(row=0, column=0, padx=30)
+        # 스플릿
+        tk.Button(self.button_frame, text="스플릿", width=btn_width, height=btn_height, font=btn_font).grid(row=0, column=1, padx=30)
+        # 스탠드
+        tk.Button(self.button_frame, text="스탠드", width=btn_width, height=btn_height, font=btn_font).grid(row=0, column=2, padx=30)
+        # 히트
+        tk.Button(self.button_frame, text="히트", width=btn_width, height=btn_height, font=btn_font).grid(row=0, column=3, padx=30)
+        # 다시하기
+        tk.Button(self.button_frame, text="다시하기", width=btn_width, height=btn_height, font=btn_font).grid(row=0, column=4, padx=30)
+
+# =========================
+# 랭킹창 (빈 틀)
+# =========================
+def open_ranking_window():
+    ranking_win = tk.Toplevel()
+    ranking_win.title("🏆 게임 랭킹")
+    ranking_win.geometry("300x400")
+    tk.Label(ranking_win, text="랭킹 순위", font=("Dotum",16,"bold"), pady=15).pack()
+    tk.Button(ranking_win, text="닫기", command=ranking_win.destroy).pack(pady=15)
+
+# =========================
 # 로그인 창
 # =========================
 def attempt_login(event=None):
     username = username_entry.get()
     password = password_entry.get()
-    if username=="" and password=="":
-        messagebox.showinfo("로그인 성공", f"{username or '게스트'}님, 환영합니다!")
-        login_win.destroy()
-        MainMenu().mainloop()
-    else:
-        messagebox.showerror("로그인 실패", "사용자 이름 또는 비밀번호가 잘못되었습니다.")
+    messagebox.showinfo("로그인", "임시 로그인 화면입니다.")
 
 if __name__=="__main__":
     login_win = tk.Tk()
@@ -391,5 +130,4 @@ if __name__=="__main__":
     tk.Button(main_frame, text="로그인", width=12, font=("Dotum",11,"bold"), command=attempt_login).grid(row=2, column=0, pady=20, sticky="e")
     tk.Button(main_frame, text="닫기", width=12, font=("Dotum",11,"bold"), command=login_win.destroy).grid(row=2, column=1, pady=20, padx=5, sticky="w")
 
-    login_win.bind('<Return>', attempt_login)
     login_win.mainloop()
