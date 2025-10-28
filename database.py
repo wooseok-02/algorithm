@@ -1,6 +1,4 @@
 import sqlite3
-import hashlib  # 비밀번호 암호화(해싱)를 위한 라이브러리
-import os       # 암호화용 무작위 값(salt) 생성을 위한 라이브러리
 
 # 데이터베이스 파일 이름을 바꾸고 싶을 때 이 한 줄만 바꾸면 됨.
 DB_FILE = "blackjack.db"    
@@ -36,57 +34,46 @@ def initialize_db(conn):
     )
     """)
     conn.commit()
-
-def _hash_password(password: str, salt: bytes) -> str: 
-    """비밀번호와 무작위 값(salt)를 받아서 PBKDF2-SHA256 해시(암호화된 결과물)를 생성하는 함수입니다.
-
-    내부적으로만 사용되는 헬퍼(helper) 함수입니다.
-    """
-    return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 100000).hex()
-
-def register_user(conn, username: str, password: str) -> bool:
-    """새로운 사용자를 등록하고 DB에 저장하는 함수입니다.
-
-    Args:
-        conn: 데이터베이스 커넥션 객체
-        username: 등록할 사용자 이름
-        password: 등록할 사용자의 비밀번호
-
-    Returns:
-        bool: 회원가입 성공 시 True, 사용자 이름 중복 시 False를 반환합니다.
-    """
-    salt = os.urandom(16)   # os 도구를 써서 나만의 무작위 값(salt)을 16글자 만듦
-    hashed_pass = _hash_password(password, salt)    # _hash_password 함수한테 password랑 salt값을 줘서 아무도 못 알아보게 암호화 (hashed_pass)
-    try:                    
-        cur = conn.cursor() 
-        cur.execute("INSERT INTO users (username, hashed_password, salt) VALUES (?, ?, ?)", (username, hashed_pass, salt.hex())) # users 테이블에 username, hashed_pass, salt를 저장하라고 명령(execute)
-        conn.commit()       
-        return True         # 성공했으면 True
-    except sqlite3.IntegrityError: 
-        # 저장을 시도하다가 사용자 이름 중복 시 IntegrityError가 발생함(user 테이블 username에 UNIQUE 제약조건이 있음)
-        return False        
     
-def login_user(conn, username: str, password: str) -> tuple | None:
-    """사용자 이름과 비밀번호를 검증하여 로그인합니다.
+
+def create_user(conn, username: str, hashed_password: str, salt: str) -> bool:
+    """[로직 팀이 호출] 암호화된 비밀번호와 salt를 받아 새 사용자를 DB에 생성합니다.
 
     Args:
         conn: 데이터베이스 커넥션 객체
-        username: 로그인할 사용자 이름
-        password: 로그인할 사용자의 비밀번호
+        username: 사용자 이름
+        hashed_password: (로직 팀이 암호화한) 해시된 비밀번호
+        salt: (로직 팀이 생성한) 솔트 값
 
     Returns:
-        tuple | None: 로그인 성공 시 (user_id, bankroll) 튜플을, 실패 시 None을 반환합니다.
+        bool: 생성 성공 시 True, 사용자 이름 중복 시 False
+    """
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO users (username, hashed_password, salt) VALUES (?, ?, ?)",
+            (username, hashed_password, salt)
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    
+
+def get_user_by_username(conn, username: str) -> tuple | None:
+    """[로직 팀이 호출] 사용자 이름으로 (id, 해시, 솔트, 칩) 정보를 조회합니다.
+
+    Args:
+        conn: 데이터베이스 커넥션 객체
+        username: 조회할 사용자 이름
+
+    Returns:
+        tuple | None: 사용자 정보가 담긴 튜플 또는 None
     """
     cur = conn.cursor()
-    cur.execute("SELECT id, hashed_password, salt, bankroll FROM users WHERE username=?", (username,)) 
-    # users 테이블에서 username이 일치하는 사용자를 찾아서, 그 사람의 id, hashed_password, salt, 칩 개수(bankroll)를 전부 가져오기
-    user_data = cur.fetchone()
-    if user_data:
-        user_id, stored_hash, salt_hex, bankroll = user_data
-        salt = bytes.fromhex(salt_hex)
-        if _hash_password(password, salt) == stored_hash: # 입력된 password를 저장된 salt로 해싱하여 그 결과가 DB에 원래 저장되어있던 해시값과 일치하는지 비교
-            return user_id, bankroll
-    return None # 사용자를 못 찾았거나, 비밀번호를 암호화한 결과가 DB의 값과 달랐다면 로그인 실패
+    cur.execute("SELECT id, hashed_password, salt, bankroll FROM users WHERE username=?", (username,))
+    return cur.fetchone()
+
 
 def update_bankroll(conn, user_id: int, new_amount: int):
     """특정 사용자의 칩 개수(bankroll)를 업데이트합니다.
@@ -117,6 +104,7 @@ def save_game(conn, player_id: int, bet: int, result: str, payout: int):
     # games 테이블에 새로운 데이터를 추가(INSERT INTO)함. player_id, bet, result, payout 각 항목에 받은 값들을 순서대로 넣음.
     conn.commit()
 
+
 def get_ranking(conn) -> list[tuple]: 
     """칩(bankroll) 보유량 기준 상위 10명의 랭킹을 조회합니다.
 
@@ -128,3 +116,4 @@ def get_ranking(conn) -> list[tuple]:
     # users 테이블에서 모든 사용자의 username과 bankroll을 선택(SELECT)
     # 선택된 결과를 bankroll 기준으로 정렬(ORDER BY)하는데, DESC(내림차순)니까 많은 사람부터 적은 사람 순으로 정렬
     return cur.fetchall()
+
