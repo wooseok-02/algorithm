@@ -13,28 +13,27 @@ def initialize_db(conn):
     # 사용자 정보를 저장하는 users 테이블 생성
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        hashed_password TEXT NOT NULL,
-        salt TEXT NOT NULL,
-        bankroll INTEGER DEFAULT 100
+        id INTEGER PRIMARY KEY AUTOINCREMENT, -- 사용자의 고유 번호 (자동 증가)
+        username TEXT UNIQUE NOT NULL,       -- 사용자 아이디 (중복 불가)
+        hashed_password TEXT NOT NULL,       -- (로직 팀이) 암호화한 비밀번호
+        salt TEXT NOT NULL,                  -- 암호화에 사용된 '솔트' 값
+        bankroll INTEGER DEFAULT 100         -- 사용자의 보유 칩 (기본값 100)
     )
     """)
 
-     # 게임 기록을 저장하는 games 테이블 생성
+    # 게임 기록을 저장하는 games 테이블 생성
     cur.execute("""
     CREATE TABLE IF NOT EXISTS games (
-        game_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id INTEGER,
-        bet INTEGER,
-        result TEXT,
-        payout INTEGER,
-        played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(player_id) REFERENCES users(id)
+        game_id INTEGER PRIMARY KEY AUTOINCREMENT, -- 게임 한 판의 고유 번호 (자동 증가)
+        player_id INTEGER,                       -- 게임을 한 사용자 ID (users.id)
+        bet INTEGER,                             -- 베팅한 금액
+        result TEXT,                             -- 게임 결과 (예: "Win", "Lose")
+        payout INTEGER,                          -- 이기거나 잃은 금액
+        played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 게임이 끝난 시간 (자동 기록)
+        FOREIGN KEY(player_id) REFERENCES users(id)  -- users 테이블의 id를 참조
     )
     """)
-    conn.commit()
-    
+    conn.commit()    
 
 def create_user(conn, username: str, hashed_password: str, salt: str) -> bool:
     """[로직 팀이 호출] 암호화된 비밀번호와 salt를 받아 새 사용자를 DB에 생성합니다.
