@@ -1,4 +1,4 @@
-# [파일 이름: game_controller.py]
+# [파일 이름: controller.py]
 # '문제의 백엔드 코드'에서 쓸모없는 것(UserDB, main, print)을 모두 제거하고
 # GUI와 DB에 '연결'할 수 있도록 '부품'만 추출하고 수정한 파일입니다.
 
