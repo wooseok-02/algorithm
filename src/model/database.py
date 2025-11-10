@@ -4,10 +4,7 @@ import sqlite3
 DB_FILE = "blackjack.db"    
 
 def initialize_db(conn):
-    """데이터베이스 연결을 받아 테이블들을 초기화합니다.
 
-    users 테이블과 games 테이블이 없으면 새로 생성합니다.
-    """
     cur = conn.cursor()
 
     # 사용자 정보를 저장하는 users 테이블 생성

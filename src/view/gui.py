@@ -5,8 +5,8 @@ import ctypes
 import hashlib
 import os
 import sqlite3
-import database as db
-import controller as gc # 게임 컨트롤러 임포트
+import src.model.database as db
+import src.model.game_logic as gc # 게임 컨트롤러 임포트
 
 # [추가] 5단계: Pillow(PIL) 라이브러리 임포트
 from PIL import Image, ImageTk
@@ -15,7 +15,7 @@ import glob # 이미지 파일을 쉽게 찾기 위해
 # =========================
 # 고해상도 DPI 지원 (Windows 전용)
 # =========================
-# ctypes.windll.shcore.SetProcessDpiAwareness(1)
+ctypes.windll.shcore.SetProcessDpiAwareness(1)
 
 # =========================
 # DB 이름
@@ -24,20 +24,18 @@ DB_NAME = db.DB_FILE
 IMAGE_DIR = "img" # [추가] 5단계: 이미지 폴더 경로
 
 # =========================
-# (이식 1) 랭킹창 (껍데기 UI 이식 + '진짜' DB 로직 연결)
+# 랭킹창 
 # =========================
 def open_ranking_window():
-    """ [수정됨] sangin의 UI 껍데기는 살리고, '진짜' DB 로직으로 교체 """
     ranking_win = tk.Toplevel()
     ranking_win.title("🏆 게임 랭킹")
     ranking_win.geometry("300x400")
     ranking_win.resizable(False, False)
     tk.Label(ranking_win, text="랭킹 순위", font=("Dotum",16,"bold"), pady=15).pack()
 
-    # [추가] '진짜' DB에서 랭킹 가져오기
+    # [추가] DB에서 랭킹 가져오기
     try:
         conn = sqlite3.connect(DB_NAME)
-        # database.py의 get_ranking 함수 호출!
         rank_data = db.get_ranking(conn) 
         conn.close()
         
@@ -58,9 +56,9 @@ def open_ranking_window():
 # (이식 2) 메인 메뉴 (UI 이식 + '진짜' DB 연동)
 # =========================
 class MainMenu(tk.Tk):
-    """ sangin의 MainMenu 클래스 껍데기를 가져와 '진짜' 로직을 심음 """
+
     def __init__(self, user_data: dict):
-        """ [수정됨] '가짜' 칩 대신 '진짜' user_data를 받음 """
+
         super().__init__()
         self.title("BLACK JACK 메인 화면")
         self.geometry("800x500")
@@ -110,11 +108,9 @@ class MainMenu(tk.Tk):
         BlackjackGUI(self, self.user_data, bet)
 
     def update_chip_label(self):
-        """ [수정됨] DB 반영 후, 현재 칩으로 라벨 업데이트 """
         self.chip_label.config(text=f"보유 돈: ${self.chips}")
 
     def charge_chips(self):
-        """ [수정됨] '좆같은 if문' ➡️ '진짜' DB +100 로직으로 변경 """
         new_bankroll = self.chips + 100 
         
         try:
@@ -135,10 +131,9 @@ class MainMenu(tk.Tk):
         main_login_window() 
 
 # =========================
-# 블랙잭 GUI (5단계 최종 완료)
+# 블랙잭 GUI
 # =========================
 class BlackjackGUI:
-    """ 5단계: Pillow를 사용해 '진짜' 카드 이미지를 GUI에 그림 """
     def __init__(self, main_menu_root, user_data: dict, bet_amount: int):
         
         self.main_window = main_menu_root
@@ -464,11 +459,9 @@ def handle_login_click(event=None):
 # 프로그램 실행
 # =========================
 def setup_database():
-    """ (우석의 원본 코드. 수정 없음) """
     conn = sqlite3.connect(db.DB_FILE) 
     db.initialize_db(conn) 
     conn.close()
-    # print(...) ➡️ 삭제
 
 # =========================
 # 프로그램 실행
