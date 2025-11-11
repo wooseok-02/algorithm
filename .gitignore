@@ -1,12 +1,18 @@
-# 파이썬 가상환경 폴더
-venv/
-.venv/
-env/
-venv
-
-# 파이썬 캐시 파일
+# 파이썬 캐시 파일 및 폴더
 __pycache__/
 *.pyc
+
+# 가상환경 폴더 (절대 올리면 안 됨)
+venv/
+
+# DB 데이터 파일 (DB 스키마만 올리고 데이터는 안 올림)
+data/blackjack.db
+# (만약 .db 파일을 실수로 지우는 게 걱정되면 이 줄은 빼셔도 돼요)
+
+# PyInstaller 빌드 파일
+dist/
+build/
+*.spec
 
 # 민감한 정보를 담는 환경 변수 파일
 .env

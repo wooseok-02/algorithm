@@ -8,7 +8,7 @@ import random
 # L-01 ~ L-06 : 블랙잭 게임 로직 (핵심 부품)
 # =======================================
 
-# 1. 카드/덱 관련 (이식) - 이 부분은 완벽해서 수정 없음
+# 1. 카드/덱 관련 
 suits = ['♠', '♥', '♦', '♣']
 ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
 values = {
@@ -37,7 +37,7 @@ class Deck:
     def deal(self):
         return self.cards.pop()
 
-# 2. 블랙잭 게임 클래스 (대대적 수술)
+# 2. 블랙잭 게임 클래스 
 class BlackjackGame:
     def __init__(self):
         """ 
@@ -140,7 +140,3 @@ class BlackjackGame:
             "player_score": player_score,
             "dealer_score": dealer_score
         }
-
-    # (참고) Surrender는 L-03의 player_surrender()인데, 
-    # 이건 GUI에서 버튼 클릭 시 바로 -bet//2를 계산하면 되므로 
-    # 이 클래스에 굳이 만들 필요는 없어 보입니다. (GUI에서 처리)
