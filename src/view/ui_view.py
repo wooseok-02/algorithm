@@ -5,7 +5,7 @@ import glob
 from PIL import Image, ImageTk
 
 # --- 상수 ---
-IMAGE_DIR = "img" 
+IMAGE_DIR = "src/view/img" 
 
 # =========================
 # 랭킹창 (View)
@@ -195,8 +195,39 @@ def main_login_window():
 
     login_win = tk.Tk()
     login_win.title("BLACK JACK 로그인")
-    login_win.geometry("600x300")
+    login_win.geometry("600x600")
     login_win.resizable(False, False)
+
+    # ----------------------------------------------------
+    # [새로 추가된 부분 시작]
+    # 이미지 로드 및 표시
+    logo_path = os.path.join(IMAGE_DIR, "blackjack_logo.png") # 이미지 파일 경로 설정
+    
+    # 이미지가 있는지 확인하고 없으면 경고
+    if not os.path.exists(logo_path):
+        messagebox.showwarning("이미지 오류", f"로그인 로고 이미지 '{logo_path}'를 찾을 수 없습니다.")
+        # 이미지가 없으면 빈 라벨이라도 표시 (혹은 아무것도 안함)
+        logo_label = tk.Label(login_win, text="BLACKJACK", font=("Dotum", 30, "bold"), fg="gold", bg="darkblue")
+    else:
+        try:
+            # PIL을 사용하여 이미지 로드 및 크기 조정
+            original_image = Image.open(logo_path)
+            resized_image = original_image.resize((400, 300), Image.LANCZOS) # 적당한 크기로 조절
+            
+            # Tkinter에서 사용할 수 있는 PhotoImage 객체 생성
+            logo_image = ImageTk.PhotoImage(resized_image)
+            
+            # 이미지를 표시할 라벨 생성
+            logo_label = tk.Label(login_win, image=logo_image)
+            logo_label.image = logo_image # 가비지 컬렉션 방지
+        except Exception as e:
+            messagebox.showerror("이미지 로드 실패", f"로그인 로고 이미지 로드 중 오류 발생: {e}")
+            logo_label = tk.Label(login_win, text="BLACKJACK", font=("Dotum", 30, "bold"), fg="gold", bg="darkblue")
+
+    # 이미지 라벨을 화면 상단에 배치
+    logo_label.pack(pady=20)
+    # [새로 추가된 부분 끝]
+    # ----------------------------------------------------
 
     main_frame = tk.Frame(login_win, padx=30, pady=30)
     main_frame.pack(expand=True)
