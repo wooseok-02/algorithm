@@ -166,8 +166,9 @@ class BlackjackGUI:
         self.root.geometry("900x600")
         self.root.configure(bg="green")
         
+        # 1. 카드 이미지 로드
         self.card_images = self.load_card_images()
-        self.current_dealer_hand_hidden = [] 
+        # self.current_dealer_hand_hidden = [] # (이건 컨트롤러가 관리)
 
         self.main_menu_button = tk.Button(self.root, text="메인 화면으로", width=11, height=2, font=("Arial",9,"bold"), command=self.root.destroy)
         self.main_menu_button.place(x=3, y=3)
@@ -175,28 +176,67 @@ class BlackjackGUI:
         self.status_label = tk.Label(self.root, text=f"베팅: ${bet_amount} / 남은 돈: ${current_bankroll - bet_amount}", bg="green", fg="yellow", font=("Arial",14,"bold"))
         self.status_label.pack(pady=15)
 
-        # 단순 설명용 라벨
-        tk.Label(self.root, text="(게임 로직은 구현되어 있지 않습니다 — UI 데모)", bg="green", fg="white").pack(pady=10)
-        tk.Button(self.root, text="게임 종료(창 닫기)", command=self.root.destroy).pack(pady=10)
+        # 2. --- 딜러 카드 영역 생성 ---
+        tk.Label(self.root, text="딜러", bg="green", fg="white", font=("Arial", 14, "bold")).pack(pady=(10,0))
+        
+        self.dealer_frame = tk.Frame(self.root, bg="green", height=160, width=800) 
+        self.dealer_frame.pack(pady=5)
+        self.dealer_frame.pack_propagate(False) 
+
+        # 3. --- 플레이어 카드 영역 생성 ---
+        tk.Label(self.root, text=f"{user_data['username']}", bg="green", fg="white", font=("Arial", 14, "bold")).pack(pady=(10,0))
+        
+        self.player_frame = tk.Frame(self.root, bg="green", height=160, width=800)
+        self.player_frame.pack(pady=5)
+        self.player_frame.pack_propagate(False)
+        
+        # 4. --- [수정됨] 게임 버튼 영역 생성 (모두 활성화) ---
+        self.button_frame = tk.Frame(self.root, bg="green")
+        self.button_frame.pack(pady=20, side="bottom")
+
+        # state="disabled" 모두 제거
+        self.hit_button = tk.Button(self.button_frame, text="Hit", font=("Arial", 14), width=10)
+        self.hit_button.pack(side="left", padx=5)
+        
+        self.stand_button = tk.Button(self.button_frame, text="Stand", font=("Arial", 14), width=10)
+        self.stand_button.pack(side="left", padx=5)
+
+        # [새로 추가된 버튼]
+        self.double_button = tk.Button(self.button_frame, text="Double-Down", font=("Arial", 14), width=10)
+        self.double_button.pack(side="left", padx=5)
+
+        self.split_button = tk.Button(self.button_frame, text="Split", font=("Arial", 14), width=10)
+        self.split_button.pack(side="left", padx=5)
+        
+        self.surrender_button = tk.Button(self.button_frame, text="Surrender", font=("Arial", 14), width=10)
+        self.surrender_button.pack(side="left", padx=5)
+        
+        # 5. --- (데모용) 초기 카드 표시 ---
+        # 실제로는 Controller가 게임 시작 시 이 함수를 호출해야 합니다.
+        dummy_player_hand = ['S_A', 'S_K']  # 'S_A' 보이도록 수정됨
+        dummy_dealer_hand = ['BACK', 'D_6']
+        
+        self.update_gui_cards(dummy_player_hand, dummy_dealer_hand)
+
 
     def load_card_images(self):
         """ [View] 카드 이미지 로드 (이건 View의 책임) """
         images = {}
-        card_size = (100, 150) 
+        card_size = (100, 150) # 카드 크기 조절
         
-        image_paths = glob.glob(os.path.join(IMAGE_DIR, "*.png"))
+        # .png, .PNG, .Png 등 모든 대소문자 확장자를 찾도록 변경
+        image_paths = glob.glob(os.path.join(IMAGE_DIR, "*.[pP][nN][gG]")) 
         
         if not image_paths:
             print(f"경고: '{IMAGE_DIR}/' 폴더에서 카드 이미지를 찾을 수 없습니다. (예: S_A.png)")
-            # 경고는 띄우되 실행은 계속
-            # messagebox.showwarning("이미지 오류", f"'{IMAGE_DIR}/' 폴더에서 카드 이미지를 찾을 수 없습니다.")
+            messagebox.showwarning("이미지 오류", f"'{IMAGE_DIR}/' 폴더에서 카드 이미지를 찾을 수 없습니다.")
             return {}
             
         for path in image_paths:
             filename = os.path.basename(path)
-            card_name = filename.split('.')[0]
+            card_name = filename.split('.')[0] # 'S_A'
             try:
-                img = Image.open(path).resize(card_size)
+                img = Image.open(path).resize(card_size, Image.LANCZOS) # LANCZOS로 부드럽게
                 images[card_name] = ImageTk.PhotoImage(img)
             except Exception as e:
                 print(f"이미지 로드 실패: {path} / {e}")
@@ -206,11 +246,41 @@ class BlackjackGUI:
             
         return images
 
-    def update_gui_cards(self, player_hand, dealer_hand):
-        """ [View] 컨트롤러의 요청을 받아 카드 그리기 """
-        # (딜러 패 저장 로직은 Controller로 이동)
-        self.current_dealer_hand_hidden = dealer_hand # (히트 시 필요하므로 저장)
+    def update_gui_cards(self, player_hand: list, dealer_hand: list):
+        """ 
+        [View] 컨트롤러의 요청을 받아 카드 그리기 
+        - player_hand: ['S_A', 'H_10'] 같은 카드 이름 리스트
+        - dealer_hand: ['BACK', 'D_K'] 같은 카드 이름 리스트
+        """
+        
+        # --- 1. 기존 카드 이미지 모두 삭제 ---
+        for widget in self.dealer_frame.winfo_children():
+            widget.destroy()
+        for widget in self.player_frame.winfo_children():
+            widget.destroy()
 
+        # --- 2. 딜러 카드 그리기 ---
+        for card_name in dealer_hand:
+            image_to_draw = self.card_images.get(card_name) # 이미지 가져오기
+            if image_to_draw:
+                label = tk.Label(self.dealer_frame, image=image_to_draw, bg="green")
+                label.pack(side="left", padx=5)
+            else:
+                # 이미지가 없을 경우 (예: S_A.png 파일이 없음)
+                print(f"이미지 없음: {card_name}")
+                label = tk.Label(self.dealer_frame, text=card_name, bg="white", fg="black", width=14, height=9, relief="sunken", font=("Arial", 10))
+                label.pack(side="left", padx=5)
+
+        # --- 3. 플레이어 카드 그리기 ---
+        for card_name in player_hand:
+            image_to_draw = self.card_images.get(card_name)
+            if image_to_draw:
+                label = tk.Label(self.player_frame, image=image_to_draw, bg="green")
+                label.pack(side="left", padx=5)
+            else:
+                print(f"이미지 없음: {card_name}")
+                label = tk.Label(self.player_frame, text=card_name, bg="white", fg="black", width=14, height=9, relief="sunken", font=("Arial", 10))
+                label.pack(side="left", padx=5)
 # =========================
 # 로그인 창 (View)
 # =========================
