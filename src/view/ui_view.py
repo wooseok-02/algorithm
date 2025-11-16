@@ -184,6 +184,7 @@ class BlackjackGUI:
         self.dealer_frame.pack_propagate(False) 
 
         # 3. --- 플레이어 카드 영역 생성 ---
+        # ⬇️ 여기가 "player"가 아닌, 로그인한 사용자 이름이 뜨도록 하는 부분입니다.
         tk.Label(self.root, text=f"{user_data['username']}", bg="green", fg="white", font=("Arial", 14, "bold")).pack(pady=(10,0))
         
         self.player_frame = tk.Frame(self.root, bg="green", height=160, width=800)
@@ -201,8 +202,8 @@ class BlackjackGUI:
         self.stand_button = tk.Button(self.button_frame, text="Stand", font=("Arial", 14), width=10)
         self.stand_button.pack(side="left", padx=5)
 
-        # [새로 추가된 버튼]
-        self.double_button = tk.Button(self.button_frame, text="Double-Down", font=("Arial", 14), width=10)
+        # ⬇️ 여기가 "Double" (Double-Down 아님)
+        self.double_button = tk.Button(self.button_frame, text="Double", font=("Arial", 14), width=10)
         self.double_button.pack(side="left", padx=5)
 
         self.split_button = tk.Button(self.button_frame, text="Split", font=("Arial", 14), width=10)
@@ -212,9 +213,10 @@ class BlackjackGUI:
         self.surrender_button.pack(side="left", padx=5)
         
         # 5. --- (데모용) 초기 카드 표시 ---
-        # 실제로는 Controller가 게임 시작 시 이 함수를 호출해야 합니다.
-        dummy_player_hand = ['S_A', 'S_K']  # 'S_A' 보이도록 수정됨
-        dummy_dealer_hand = ['BACK', 'D_6']
+        # ⬇️ 카드를 뜨게 만드는 핵심 코드입니다.
+        #    (img 폴더에 C_2, C_3, BACK, C_4가 있다고 가정)
+        dummy_player_hand = ['C_2', 'C_3'] 
+        dummy_dealer_hand = ['BACK', 'C_4'] 
         
         self.update_gui_cards(dummy_player_hand, dummy_dealer_hand)
 
