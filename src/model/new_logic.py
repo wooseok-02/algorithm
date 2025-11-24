@@ -124,11 +124,13 @@ class BlackjackGame:
             npc.bet = bet 
             npc.used_skill_this_round = False
             
+        initial_dialogues = self.get_current_npc_dialogues()
         # GUI에 전달할 초기 상태 반환
         return {
             "player_hand": self.player_hand,
-            "dealer_hand_hidden": [self.dealer_hand[0], '?'],
-            "npc_hands": {n.name: [n.hand[0], '?'] for n in self.npcs} 
+            "dealer_hand_hidden": [self.dealer_hand[0], 'BACK'],
+            "npc_hands": {n.name: [n.hand[0], 'BACK'] for n in self.npcs},
+            "npc_dialogues": initial_dialogues
         }
 
     # A 관련 판정 로직 (유지)
@@ -200,74 +202,189 @@ class BlackjackGame:
         
         # 1. 플레이어 점수 17 이상 확인
         if player_score < 17 or player_score > 21:
-            return False, "" 
+            return False, "", None 
             
         # 2. 공격형 NPC 점수 17 이상 확인
         aggressive_npc = next((n for n in self.npcs if n.type == 'AGGRESSIVE'), None)
         if aggressive_npc is None:
-            return False, ""
+            return False, "", None
             
         # NPC는 카드 1장이 히든이 아니므로 현재 핸드로 점수 계산
         npc_score = self.calculate_score(aggressive_npc.hand) 
         if npc_score < 17 or npc_score > 21:
-            return False, ""
+            return False, "", aggressive_npc.name
             
         # 3. 40% 확률 발동
         if random.random() < 0.4:
-            return True, f"{aggressive_npc.name}의 패시브 발동! 플레이어 강제 HIT."
+            return True, f"{aggressive_npc.name}의 패시브 발동! 플레이어 강제 HIT.", aggressive_npc.name
             
-        return False, ""
+        return False, "", aggressive_npc.name
     
-    # L-13 NPC 턴 (능동 스킬 포함)
+    # L-13 NPC 턴 (능동 스킬 + 대사)
     def npcs_play_turn(self):
-        
-        # 딜러 객체를 잠시 생성하여 딜러의 룰을 사용합니다.
-        # 기존 코드에서는 NPC가 딜러를 상대로 플레이하는 로직이 없었으므로, 
-        # NPC는 무조건 17 미만 Hit, 17 이상 Stand 룰을 따르는 것으로 가정합니다.
-        
         turn_results = {}
-        for npc in self.npcs:
-            score = self.calculate_score(npc.hand)
-            log = f"{npc.name} 턴 시작. 점수: {score}"
-            
-            # --- 능동 스킬 (라운드당 1회) ---
-            if not npc.used_skill_this_round:
-                
-                # 안정형 (SAFE): 12~16일 때 버스트 여부 확인 후 Hit/Stand
-                if npc.type == 'SAFE' and 12 <= score <= 16:
-                    next_card = self.deck.peek_next_card()
-                    if next_card:
-                        temp_score = self.calculate_score(npc.hand + [next_card])
-                        if temp_score > 21:
-                            # 버스트 예상 -> Stand (스킬 사용으로 간주)
-                            npc.used_skill_this_round = True
-                            log += f" -> 스킬(Peek): 버스트 예상되어 Stand."
-                            continue 
 
-                # 공격형 (AGGRESSIVE): 9~11일 때 Double Down (Bet * 2 후 1장)
-                elif npc.type == 'AGGRESSIVE' and 9 <= score <= 11:
-                    npc.bet *= 2
-                    npc.hand.append(self.deck.deal())
-                    npc.used_skill_this_round = True
-                    log += f" -> 스킬(Double): 베팅 2배, 1장 Hit. 점수: {npc.score(self)}"
+        for npc in self.npcs:
+            dialogues = []
+            final_state = "stand"
+
+            while True:
+                score = self.calculate_score(npc.hand)
+
+                if score > 21:
+                    dialogues.extend(self._npc_bust_lines(npc.type))
+                    final_state = "bust"
+                    break
+
+                if npc.type == 'AGGRESSIVE':
+                    decision = self._play_aggressive_turn(npc, score, dialogues)
+                elif npc.type == 'SAFE':
+                    decision = self._play_safe_turn(npc, score, dialogues)
+                else:
+                    decision = self._play_unique_turn(npc, score, dialogues)
+
+                if decision == "continue":
                     continue
 
-                # 특이형 (UNIQUE): 13~16일 때 카드 2장 교체
-                elif npc.type == 'UNIQUE' and 13 <= score <= 16:
-                    # 기존 카드 버리기 (덱으로 돌아가지 않음)
-                    npc.hand = [self.deck.deal(), self.deck.deal()]
-                    npc.used_skill_this_round = True
-                    score = self.calculate_score(npc.hand)
-                    log += f" -> 스킬(Swap): 카드 2장 교체. 점수: {score}"
-            
-            # --- 기본 플레이 룰: 17 미만 Hit ---
-            while self.calculate_score(npc.hand) < 17:
-                npc.hand.append(self.deck.deal())
-            
-            log += f" -> 최종 점수: {self.calculate_score(npc.hand)}"
-            turn_results[npc.name] = log
+                final_state = decision
+                break
+
+            turn_results[npc.name] = {
+                "hand": list(npc.hand),
+                "dialogues": dialogues,
+                "final_score": self.calculate_score(npc.hand),
+                "state": final_state
+            }
 
         return turn_results
+
+    def _play_aggressive_turn(self, npc: NPC, score: int, dialogues: list):
+        if not npc.used_skill_this_round and 9 <= score <= 11:
+            dialogues.append("찬스는 놓칠 수 없죠!")
+            dialogues.append("[스킬 : 더블 다운] 발동")
+            npc.bet *= 2
+            npc.hand.append(self.deck.deal())
+            npc.used_skill_this_round = True
+            return "double_down"
+
+        if 12 <= score <= 16:
+            dialogues.append("가보는 겁니다!")
+            npc.hand.append(self.deck.deal())
+            return "continue"
+
+        if score == 17:
+            dialogues.append("에이 17점은 너무 낮아요")
+            npc.hand.append(self.deck.deal())
+            return "continue"
+
+        if 18 <= score <= 21:
+            dialogues.append("이 정도면 만족하죠")
+            return "stand"
+
+        if score <= 8:
+            dialogues.append("더 가야죠!")
+            npc.hand.append(self.deck.deal())
+            return "continue"
+
+        return "stand"
+
+    def _play_safe_turn(self, npc: NPC, score: int, dialogues: list):
+        if 4 <= score <= 11:
+            dialogues.append("음, 나쁘지 않네요.")
+            npc.hand.append(self.deck.deal())
+            return "continue"
+
+        if 12 <= score <= 16:
+            dialogues.append("아... 이거 애매한데요...")
+            dialogues.append("[스킬: 위기 감지] 발동")
+            npc.used_skill_this_round = True
+            next_card = self.deck.peek_next_card()
+            if not next_card:
+                dialogues.append("덱이 비었네요. 여기서 멈출게요.")
+                return "stand"
+
+            temp_score = self.calculate_score(npc.hand + [next_card])
+            if temp_score > 21:
+                dialogues.append("다음 카드가 위험해요. 그냥 스탠드하겠습니다.")
+                return "stand"
+
+            dialogues.append("괜찮을 것 같네요. 한 장 더.")
+            npc.hand.append(self.deck.deal())
+            return "continue"
+
+        if 17 <= score <= 19:
+            dialogues.append("이 정도면 충분하네요.")
+            return "stand"
+
+        if score >= 20:
+            dialogues.append("이 정도면 완벽합니다.")
+            return "stand"
+
+        dialogues.append("조심스럽게 한 장 더.")
+        npc.hand.append(self.deck.deal())
+        return "continue"
+
+    def _play_unique_turn(self, npc: NPC, score: int, dialogues: list):
+        if score <= 12:
+            dialogues.append("한 장 더.")
+            npc.hand.append(self.deck.deal())
+            return "continue"
+
+        if 13 <= score <= 16:
+            if not npc.used_skill_this_round:
+                dialogues.append("이런 끔찍한 패로는 안돼. 다시 받겠다!")
+                dialogues.append("[스킬 : 리로드] 발동")
+                npc.hand = [self.deck.deal(), self.deck.deal()]
+                npc.used_skill_this_round = True
+                return "continue"
+
+            dialogues.append("아직 부족해. 한 장 더.")
+            npc.hand.append(self.deck.deal())
+            return "continue"
+
+        if 17 <= score <= 21:
+            dialogues.append("어디 한번 이겨보시지!")
+            return "stand"
+
+        return "stand"
+
+    def _npc_bust_lines(self, npc_type: str):
+        if npc_type == 'AGGRESSIVE':
+            return ["안돼... 이럴 리가..", "패배다..."]
+        if npc_type == 'SAFE':
+            return ["어, 이런... 버스트네요.", "다음엔 더 조심해야겠어요."]
+        return ["으... 계획이 어긋났군.", "다음 판을 노리지."]
+
+    def _npc_preview_dialogue(self, npc: NPC):
+        score = self.calculate_score(npc.hand)
+        if npc.type == 'AGGRESSIVE':
+            if 9 <= score <= 11:
+                return ["찬스는 놓칠 수 없죠!", "[스킬 : 더블 다운] 준비 중"]
+            if 12 <= score <= 16:
+                return ["가보는 겁니다!", f"현재 점수: {score}"]
+            if score == 17:
+                return ["에이 17점은 너무 낮아요"]
+            if 18 <= score <= 21:
+                return ["이 정도면 만족하죠"]
+            return [f"준비 중... (점수 {score})"]
+
+        if npc.type == 'SAFE':
+            if 4 <= score <= 11:
+                return ["음, 나쁘지 않네요."]
+            if 12 <= score <= 16:
+                return ["아... 이거 애매한데요...", "[스킬: 위기 감지] 준비 중"]
+            if 17 <= score <= 19:
+                return ["이 정도면 충분하네요."]
+            return [f"조심스럽게 보겠습니다. (점수 {score})"]
+
+        # UNIQUE
+        if score <= 12:
+            return ["한 장 더 생각 중이다."]
+        if 13 <= score <= 16:
+            return ["이런 끔찍한 패로는 안돼. 다시 받겠다!", "[스킬 : 리로드] 준비 중"]
+        if 17 <= score <= 21:
+            return ["어디 한번 이겨보시지!"]
+        return [f"지켜본다... (점수 {score})"]
 
     # 딜러턴 (유지)
     def dealer_turn(self):
@@ -302,6 +419,8 @@ class BlackjackGame:
         
         total_additional_loss = 0 # 특이 NPC 패시브 적용 시 플레이어의 추가 손실
         npc_settlement_details = {}
+        passive_dialogues = {n.name: [] for n in self.npcs}
+        teamwork_bonus = 0
 
         for npc in self.npcs:
             npc_score = self.calculate_score(npc.hand)
@@ -320,15 +439,15 @@ class BlackjackGame:
             
             # L-15 안정형 NPC 패시브 적용: (플레이어 Win & NPC Win) -> +30% 보너스
             if npc.type == 'SAFE' and player_result.startswith("Win") and npc_result.startswith("Win"):
-                bonus = int(npc.bet * 0.3)
-                npc_payout += bonus
-                npc_result += f" (+{bonus} 보너스)"
+                bonus = int(self.bet_amount * 0.3)
+                teamwork_bonus += bonus
+                passive_dialogues[npc.name].append("[팀워크] 우리가 해냈습니다! 믿고 있었다구요!")
                 
             # L-16 특이 NPC 패시브 적용: (플레이어 Lose & NPC Win) -> 플레이어 추가 20% 손실
             elif npc.type == 'UNIQUE' and player_result.startswith("Lose") and npc_result.startswith("Win"):
                 additional_loss = int(self.bet_amount * 0.2)
                 total_additional_loss += additional_loss
-                npc_result += f" (플레이어 추가 {-additional_loss})" # NPC 입장에서는 추가 이득
+                passive_dialogues[npc.name].append("[견제] 이런, 아쉽게 됐네요")
                 
             
             npc_settlement_details[npc.name] = {
@@ -339,7 +458,7 @@ class BlackjackGame:
             # Note: NPC 잔액 관리는 DB/Controller 쪽에서 담당한다고 가정하고 여기서는 payout만 계산합니다.
 
         # --- 3. 최종 플레이어 정산 ---
-        final_player_payout = player_payout - total_additional_loss
+        final_player_payout = player_payout + teamwork_bonus - total_additional_loss
 
 
         return {
@@ -349,5 +468,11 @@ class BlackjackGame:
             "dealer_hand": self.dealer_hand,
             "player_score": player_score,
             "dealer_score": dealer_score,
-            "npc_results": npc_settlement_details
+            "npc_results": npc_settlement_details,
+            "passive_dialogues": passive_dialogues,
+            "teamwork_bonus": teamwork_bonus,
+            "unique_penalty": total_additional_loss
         }
+
+    def get_current_npc_dialogues(self):
+        return {npc.name: self._npc_preview_dialogue(npc) for npc in self.npcs}
