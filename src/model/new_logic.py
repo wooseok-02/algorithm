@@ -1,0 +1,353 @@
+import random
+
+# =======================================
+# L-01 ~ L-06 : 블랙잭 게임 로직 (핵심 부품)
+# =======================================
+
+# 1. 카드/덱 관련 
+suits = ['♠', '♥', '♦', '♣']
+ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
+values = {
+    'A': 11, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
+    '7': 7, '8': 8, '9': 9, '10': 10, 'J': 10, 'Q': 10, 'K': 10
+}
+
+class Card:
+    def __init__(self, suit, rank):
+        self.suit = suit
+        self.rank = rank
+
+    def __repr__(self):
+        return f"{self.suit[0]}_{self.rank}" 
+
+class Deck:
+    def __init__(self):
+        self.cards = [Card(s, r) for s in suits for r in ranks]
+        self.shuffle()
+
+    def shuffle(self):
+        random.shuffle(self.cards)
+
+    def deal(self):
+        """ 일반 카드 뽑기 """
+        if not self.cards:
+            self.cards = [Card(s, r) for s in suits for r in ranks]
+            self.shuffle()
+        return self.cards.pop()
+
+    # L-08 아이템 1: 1~5 사이의 카드 뽑기 (A 포함)
+    def deal_low_card(self):
+        low_ranks = ['A', '2', '3', '4', '5']
+        filtered_cards = [c for c in self.cards if c.rank in low_ranks]
+        
+        # 덱에 해당 카드가 없으면 일반 deal로 대체 (재고 부족)
+        if not filtered_cards:
+            return self.deal() 
+        
+        card_to_deal = random.choice(filtered_cards)
+        self.cards.remove(card_to_deal) 
+        return card_to_deal
+        
+    # L-09 아이템 2: 6~10 사이의 카드 뽑기
+    def deal_high_card(self):
+        high_ranks = ['6', '7', '8', '9', '10']
+        filtered_cards = [c for c in self.cards if c.rank in high_ranks]
+        
+        if not filtered_cards:
+            return self.deal()
+            
+        card_to_deal = random.choice(filtered_cards)
+        self.cards.remove(card_to_deal)
+        return card_to_deal
+        
+    def peek_next_card(self):
+        """ NPC-1(안정형) 스킬을 위한 다음 카드 미리보기 (뽑지 않고 확인만) """
+        if not self.cards:
+            return None # 덱이 비었을 경우
+        return self.cards[-1]
+
+# 2. NPC 클래스 추가 (L-07)
+class NPC:
+    def __init__(self, name, npc_type, bet_amount):
+        self.name = name
+        self.type = npc_type  # 'SAFE', 'AGGRESSIVE', 'UNIQUE'
+        self.hand = []
+        self.bet = bet_amount
+        self.used_skill_this_round = False # 능동 스킬 사용 여부
+        
+    def score(self, game_ref):
+        """ BlackjackGame의 점수 계산 함수를 사용합니다. """
+        return game_ref.calculate_score(self.hand)
+
+# 3. Dealer 클래스 (유지)
+class Dealer:
+    def __init__(self):
+        self.hand = []
+    def play_turn(self, deck, game_ref):
+        while game_ref.calculate_score(self.hand) < 17:
+            self.hand.append(deck.deal())
+        return self.hand
+
+class BlackjackGame:
+    # L-17 아이템 가격 정의
+    ITEM_PRICES = {
+        'item_low': 50,  # 1~5 카드 뽑기
+        'item_high': 80   # 6~10 카드 뽑기
+    }
+    
+    def __init__(self):
+        self.deck = Deck()
+        self.player_hand = []
+        self.dealer_hand = []
+        self.bet_amount = 0 
+        
+        # L-10 NPC 인스턴스 생성
+        self.npcs = [
+            NPC("NPC-1 (안정형)", 'SAFE', 100), 
+            NPC("NPC-2 (공격형)", 'AGGRESSIVE', 100),
+            NPC("NPC-3 (특이형)", 'UNIQUE', 100)
+        ]
+        
+        # NPC의 정산 결과를 저장할 딕셔너리
+        self.npc_round_results = {} 
+
+    # L-01 게임 세팅 (NPC 초기화 포함)
+    def start_game(self, bet: int):
+        self.bet_amount = bet
+        self.deck.shuffle() 
+        self.player_hand = [self.deck.deal(), self.deck.deal()]
+        self.dealer_hand = [self.deck.deal(), self.deck.deal()]
+        
+        # L-12 NPC에게도 카드 지급 및 상태 초기화
+        for npc in self.npcs:
+            npc.hand = [self.deck.deal(), self.deck.deal()]
+            npc.bet = bet 
+            npc.used_skill_this_round = False
+            
+        # GUI에 전달할 초기 상태 반환
+        return {
+            "player_hand": self.player_hand,
+            "dealer_hand_hidden": [self.dealer_hand[0], '?'],
+            "npc_hands": {n.name: [n.hand[0], '?'] for n in self.npcs} 
+        }
+
+    # A 관련 판정 로직 (유지)
+    def calculate_score(self, hand):
+        total = 0
+        aces = 0
+        for card in hand:
+            # Note: Card.__repr__이 'S_A' 형태이므로, 이 함수는 Card 객체의 리스트를 받아야 합니다.
+            if card == '?': continue 
+            total += values[card.rank]
+            if card.rank == 'A':
+                aces += 1
+        while total > 21 and aces:
+            total -= 10
+            aces -= 1
+        return total
+
+    # L-03 플레이어 액션 (유지)
+    def player_hit(self):
+        new_card = self.deck.deal()
+        self.player_hand.append(new_card)
+        score = self.calculate_score(self.player_hand)
+        
+        status = "Hit"
+        if score > 21:
+            status = "Bust"
+            
+        return {
+            "new_card": new_card,
+            "player_hand": self.player_hand,
+            "score": score,
+            "status": status 
+        }
+
+    # L-18 아이템 구매 및 사용 함수 (재정의됨)
+    def purchase_and_use_item(self, item_type: str, player_balance: int):
+        price = self.ITEM_PRICES.get(item_type)
+        if price is None:
+            return {"status": "InvalidItem", "cost": 0}
+            
+        if player_balance < price:
+            return {"status": "InsufficientFunds", "cost": price}
+
+        cost = price
+        
+        if item_type == 'item_low':
+            new_card = self.deck.deal_low_card()
+        else:
+            new_card = self.deck.deal_high_card()
+            
+        self.player_hand.append(new_card)
+        score = self.calculate_score(self.player_hand)
+        
+        status = "ItemUsed"
+        if score > 21:
+            status = "BustAfterItem"
+            
+        return {
+            "status": status,
+            "cost": cost,                   
+            "new_card": new_card,
+            "player_hand": self.player_hand,
+            "score": score
+        }
+
+    # L-19 공격형 NPC 패시브 체크 함수 (Controller에서 Stand 전에 호출)
+    def check_aggressive_passive(self):
+        player_score = self.calculate_score(self.player_hand)
+        
+        # 1. 플레이어 점수 17 이상 확인
+        if player_score < 17 or player_score > 21:
+            return False, "" 
+            
+        # 2. 공격형 NPC 점수 17 이상 확인
+        aggressive_npc = next((n for n in self.npcs if n.type == 'AGGRESSIVE'), None)
+        if aggressive_npc is None:
+            return False, ""
+            
+        # NPC는 카드 1장이 히든이 아니므로 현재 핸드로 점수 계산
+        npc_score = self.calculate_score(aggressive_npc.hand) 
+        if npc_score < 17 or npc_score > 21:
+            return False, ""
+            
+        # 3. 40% 확률 발동
+        if random.random() < 0.4:
+            return True, f"{aggressive_npc.name}의 패시브 발동! 플레이어 강제 HIT."
+            
+        return False, ""
+    
+    # L-13 NPC 턴 (능동 스킬 포함)
+    def npcs_play_turn(self):
+        
+        # 딜러 객체를 잠시 생성하여 딜러의 룰을 사용합니다.
+        # 기존 코드에서는 NPC가 딜러를 상대로 플레이하는 로직이 없었으므로, 
+        # NPC는 무조건 17 미만 Hit, 17 이상 Stand 룰을 따르는 것으로 가정합니다.
+        
+        turn_results = {}
+        for npc in self.npcs:
+            score = self.calculate_score(npc.hand)
+            log = f"{npc.name} 턴 시작. 점수: {score}"
+            
+            # --- 능동 스킬 (라운드당 1회) ---
+            if not npc.used_skill_this_round:
+                
+                # 안정형 (SAFE): 12~16일 때 버스트 여부 확인 후 Hit/Stand
+                if npc.type == 'SAFE' and 12 <= score <= 16:
+                    next_card = self.deck.peek_next_card()
+                    if next_card:
+                        temp_score = self.calculate_score(npc.hand + [next_card])
+                        if temp_score > 21:
+                            # 버스트 예상 -> Stand (스킬 사용으로 간주)
+                            npc.used_skill_this_round = True
+                            log += f" -> 스킬(Peek): 버스트 예상되어 Stand."
+                            continue 
+
+                # 공격형 (AGGRESSIVE): 9~11일 때 Double Down (Bet * 2 후 1장)
+                elif npc.type == 'AGGRESSIVE' and 9 <= score <= 11:
+                    npc.bet *= 2
+                    npc.hand.append(self.deck.deal())
+                    npc.used_skill_this_round = True
+                    log += f" -> 스킬(Double): 베팅 2배, 1장 Hit. 점수: {npc.score(self)}"
+                    continue
+
+                # 특이형 (UNIQUE): 13~16일 때 카드 2장 교체
+                elif npc.type == 'UNIQUE' and 13 <= score <= 16:
+                    # 기존 카드 버리기 (덱으로 돌아가지 않음)
+                    npc.hand = [self.deck.deal(), self.deck.deal()]
+                    npc.used_skill_this_round = True
+                    score = self.calculate_score(npc.hand)
+                    log += f" -> 스킬(Swap): 카드 2장 교체. 점수: {score}"
+            
+            # --- 기본 플레이 룰: 17 미만 Hit ---
+            while self.calculate_score(npc.hand) < 17:
+                npc.hand.append(self.deck.deal())
+            
+            log += f" -> 최종 점수: {self.calculate_score(npc.hand)}"
+            turn_results[npc.name] = log
+
+        return turn_results
+
+    # 딜러턴 (유지)
+    def dealer_turn(self):
+        while self.calculate_score(self.dealer_hand) < 17:
+            self.dealer_hand.append(self.deck.deal())
+        return self.dealer_hand 
+
+    # L-05/06 결과 판정 및 정산 (NPC 패시브 추가)
+    def check_result(self):
+        player_score = self.calculate_score(self.player_hand)
+        dealer_score = self.calculate_score(self.dealer_hand)
+        
+        # --- 1. 플레이어 VS 딜러 기본 정산 ---
+        player_payout = 0
+        player_result = "Push (Tie)"
+        
+        if player_score > 21:
+            player_result, player_payout = "Lose (Bust)", -self.bet_amount
+        elif dealer_score > 21:
+            player_result, player_payout = "Win (Dealer Bust)", self.bet_amount
+        elif player_score > dealer_score:
+            player_result, player_payout = "Win", self.bet_amount
+        elif player_score < dealer_score:
+            player_result, player_payout = "Lose", -self.bet_amount
+        
+        # 블랙잭 룰 적용
+        if player_score == 21 and len(self.player_hand) == 2 and player_result != "Lose": 
+            player_result, player_payout = "Blackjack!", int(self.bet_amount * 1.5)
+
+
+        # --- 2. NPC VS 딜러 기본 정산 및 패시브 적용 ---
+        
+        total_additional_loss = 0 # 특이 NPC 패시브 적용 시 플레이어의 추가 손실
+        npc_settlement_details = {}
+
+        for npc in self.npcs:
+            npc_score = self.calculate_score(npc.hand)
+            npc_payout = 0
+            npc_result = "Push (Tie)"
+
+            if npc_score > 21:
+                npc_result, npc_payout = "Lose (Bust)", -npc.bet
+            elif dealer_score > 21:
+                npc_result, npc_payout = "Win (Dealer Bust)", npc.bet
+            elif npc_score > dealer_score:
+                npc_result, npc_payout = "Win", npc.bet
+            elif npc_score < dealer_score:
+                npc_result, npc_payout = "Lose", -npc.bet
+            
+            
+            # L-15 안정형 NPC 패시브 적용: (플레이어 Win & NPC Win) -> +30% 보너스
+            if npc.type == 'SAFE' and player_result.startswith("Win") and npc_result.startswith("Win"):
+                bonus = int(npc.bet * 0.3)
+                npc_payout += bonus
+                npc_result += f" (+{bonus} 보너스)"
+                
+            # L-16 특이 NPC 패시브 적용: (플레이어 Lose & NPC Win) -> 플레이어 추가 20% 손실
+            elif npc.type == 'UNIQUE' and player_result.startswith("Lose") and npc_result.startswith("Win"):
+                additional_loss = int(self.bet_amount * 0.2)
+                total_additional_loss += additional_loss
+                npc_result += f" (플레이어 추가 {-additional_loss})" # NPC 입장에서는 추가 이득
+                
+            
+            npc_settlement_details[npc.name] = {
+                "result": npc_result,
+                "payout": npc_payout,
+                "score": npc_score
+            }
+            # Note: NPC 잔액 관리는 DB/Controller 쪽에서 담당한다고 가정하고 여기서는 payout만 계산합니다.
+
+        # --- 3. 최종 플레이어 정산 ---
+        final_player_payout = player_payout - total_additional_loss
+
+
+        return {
+            "result_msg": player_result, 
+            "payout": final_player_payout,      
+            "player_hand": self.player_hand,
+            "dealer_hand": self.dealer_hand,
+            "player_score": player_score,
+            "dealer_score": dealer_score,
+            "npc_results": npc_settlement_details
+        }
