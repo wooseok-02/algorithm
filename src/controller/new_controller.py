@@ -36,19 +36,26 @@ class AuthController:
 
     def start_login_window(self):
         """ 로그인 창을 '생성'하고 '이벤트'를 '연결'합니다. """
-        self.login_win, self.username_entry, self.password_entry = view.main_login_window()
+        result = view.main_login_window()
+        self.login_win = result[0]
+        self.username_entry = result[1]
+        self.password_entry = result[2]
+        
+        # 버튼 객체가 반환되는 경우 직접 연결
+        if len(result) >= 5:
+            login_btn = result[3]
+            signup_btn = result[4]
+            login_btn.config(command=self.handle_login_click)
+            signup_btn.config(command=self.handle_signup_click)
+        else:
+            # 하위 호환성: 기존 방식으로 버튼 찾기
+            for widget in self.login_win.winfo_children()[0].winfo_children():
+                if widget.cget("text") == "회원가입":
+                    widget.config(command=self.handle_signup_click)
+                elif widget.cget("text") == "로그인":
+                    widget.config(command=self.handle_login_click)
         
         self.login_win.bind('<Return>', self.handle_login_click)
-        
-        # 'view'가 아닌 'controller'에서 버튼을 찾아 command를 설정
-        # (view.main_login_window가 반환한 login_win의 첫 번째 자식 프레임 내 위젯을 탐색)
-        # 이 프레임은 'main_frame'입니다.
-        for widget in self.login_win.winfo_children()[0].winfo_children():
-            if widget.cget("text") == "회원가입":
-                widget.config(command=self.handle_signup_click)
-            elif widget.cget("text") == "로그인":
-                widget.config(command=self.handle_login_click)
-        
         self.login_win.mainloop()
 
     def handle_signup_click(self):
@@ -224,6 +231,7 @@ class GameController:
         self.npc_step_delay_ms = 2000
         self._resolving_round = False
         self.npc_balances = {}  # NPC 잔액 저장
+        self._npc_turn_in_progress = False  # NPC 턴 진행 중 플래그
 
         # NPC 잔액 로드
         self._load_npc_balances()
@@ -372,7 +380,7 @@ class GameController:
 
     def handle_hit(self):
         """ [컨트롤러] Hit 로직 """
-        if self.game_is_over:
+        if self.game_is_over or self._npc_turn_in_progress:
             return
             
         hit_result = self.game_model.player_hit()
@@ -392,10 +400,14 @@ class GameController:
             self.player_stood = True
             self._disable_player_controls()
             self._start_resolution_pipeline()
+        else:
+            # 플레이어가 Hit한 후 NPC들이 한 번씩 행동
+            self._disable_player_controls()
+            self._play_npc_single_round()
 
     def handle_stand(self):
         """ [컨트롤러] Stand 로직 (공격형 NPC 패시브 체크 포함) """
-        if self.game_is_over or self.player_stood:
+        if self.game_is_over or self.player_stood or self._npc_turn_in_progress:
             return
         
         self.player_stood = True
@@ -410,6 +422,7 @@ class GameController:
             self._enter_forced_action_state(aggressive_name)
             return 
         
+        # Stand 시 남은 NPC들만 처리
         self._start_resolution_pipeline()
 
     def finalize_game(self, result: str, payout: int):
@@ -492,17 +505,85 @@ class GameController:
         self.view.hit_button.config(state="disabled")
         self.view.stand_button.config(state="disabled")
         self.view.set_item_button_state("disabled")
+    
+    def _enable_player_controls(self):
+        """플레이어 컨트롤 활성화 (게임이 끝나지 않았고, NPC 턴이 아닐 때만)"""
+        if self.game_is_over or self.player_stood or self._npc_turn_in_progress:
+            return
+        self.view.hit_button.config(state="normal")
+        self.view.stand_button.config(state="normal")
+        if not self.item_used_this_round:
+            self.view.set_item_button_state("normal")
 
     def _start_resolution_pipeline(self):
+        """플레이어 Stand 후 남은 NPC들 처리"""
         if self._resolving_round:
             return
         self._resolving_round = True
+        
+        # 남은 NPC들만 처리 (이미 Stand한 NPC는 round_completed=True이므로 건너뜀)
+        # npcs_play_turn은 모든 NPC를 처리하지만, round_completed가 True인 NPC는 
+        # 내부적으로 처리하지 않거나 이미 완료된 상태로 처리됨
         npc_turn_summary, npc_steps = self.game_model.npcs_play_turn(capture_steps=True)
         self.pending_npc_turn_summary = npc_turn_summary
         steps_queue = list(npc_steps or [])
         self._play_npc_steps(steps_queue, self._after_npc_phase)
 
+    def _play_npc_single_round(self):
+        """플레이어 Hit 후 NPC들이 한 번씩 행동하는 턴"""
+        if self._npc_turn_in_progress:
+            return
+        
+        self._npc_turn_in_progress = True
+        self.view.status_label.config(text="NPC 턴 진행 중...")
+        
+        # 각 NPC가 한 번씩 행동
+        npc_steps = self.game_model.npc_single_round_step()
+        
+        if not npc_steps:
+            # 모든 NPC가 이미 Stand했거나 Bust한 경우
+            self._npc_turn_in_progress = False
+            self._enable_player_controls()
+            self.view.status_label.config(text="NPC 턴 종료. 플레이어 턴입니다.")
+            return
+        
+        # NPC 행동을 순차적으로 표시
+        steps_queue = list(npc_steps)
+        self._play_npc_single_steps(steps_queue, self._after_npc_single_round)
+    
+    def _play_npc_single_steps(self, steps_queue: list, on_complete):
+        """NPC들이 한 번씩 행동하는 단계를 순차적으로 표시"""
+        if not steps_queue:
+            npc_balances = self.game_model.get_npc_balances()
+            npc_bets = {npc.name: npc.bet for npc in self.game_model.npcs}
+            self.view.update_npc_hands(self.current_npc_visible_hands, self.current_npc_dialogues, npc_balances, npc_bets)
+            on_complete()
+            return
+
+        step = steps_queue.pop(0)
+        name = step.get("name")
+        if name:
+            self.current_npc_visible_hands[name] = step.get("hand", [])
+            self.current_npc_dialogues[name] = step.get("dialogues", [])
+        npc_balances = self.game_model.get_npc_balances()
+        npc_bets = {npc.name: npc.bet for npc in self.game_model.npcs}
+        self.view.update_npc_hands(self.current_npc_visible_hands, self.current_npc_dialogues, npc_balances, npc_bets)
+        self.view.root.after(self.npc_step_delay_ms, lambda: self._play_npc_single_steps(steps_queue, on_complete))
+    
+    def _after_npc_single_round(self):
+        """NPC 한 턴이 끝난 후 플레이어 턴으로 복귀"""
+        self._npc_turn_in_progress = False
+        self._enable_player_controls()
+        
+        # 모든 NPC가 Stand했는지 확인
+        all_npcs_stand = all(npc.round_completed for npc in self.game_model.npcs)
+        if all_npcs_stand:
+            self.view.status_label.config(text="모든 NPC가 Stand했습니다. 플레이어 턴입니다.")
+        else:
+            self.view.status_label.config(text="NPC 턴 종료. 플레이어 턴입니다.")
+    
     def _play_npc_steps(self, steps_queue: list, on_complete):
+        """게임 종료 시 모든 NPC 행동을 표시 (기존 로직 유지)"""
         if not steps_queue:
             npc_balances = self.game_model.get_npc_balances()
             npc_bets = {npc.name: npc.bet for npc in self.game_model.npcs}
@@ -535,14 +616,21 @@ class GameController:
 
     def _run_dealer_phase_and_finalize(self):
         dealer_final_hand = self.game_model.dealer_turn()
-        actual_dealer_list = [self.view._normalize_card_id(card) for card in dealer_final_hand]
+        
+        # 딜러 카드를 먼저 BACK으로 표시 (뒤집기 전 상태)
+        dealer_back_list = ['BACK'] * len(dealer_final_hand)
         self.view.update_gui_cards(
             self.game_model.player_hand,
-            actual_dealer_list,
+            dealer_back_list,
             self.current_npc_visible_hands,
             self.current_npc_dialogues
         )
         
+        # 딜러 카드를 순차적으로 뒤집고, 모든 카드가 뒤집힌 후 1초 후에 결과 표시
+        self.view.reveal_dealer_hand(dealer_final_hand, on_complete=self._after_dealer_cards_revealed)
+    
+    def _after_dealer_cards_revealed(self):
+        """딜러 카드가 모두 뒤집힌 후 호출되는 콜백"""
         final_result = self.game_model.check_result()
         self.npc_final_settlement = final_result['npc_results']
         

@@ -298,6 +298,22 @@ class BlackjackGame:
         action_steps = [] if capture_steps else None
 
         for npc in self.npcs:
+            # 이미 Stand하거나 Bust한 NPC는 건너뛰기
+            if npc.round_completed:
+                # 이미 완료된 NPC의 현재 상태를 결과에 포함
+                npc_score = self.calculate_score(npc.hand)
+                if npc_score > 21:
+                    final_state = "bust"
+                else:
+                    final_state = "stand"
+                turn_results[npc.name] = {
+                    "hand": list(npc.hand),
+                    "dialogues": [],
+                    "final_score": npc_score,
+                    "state": final_state
+                }
+                continue
+            
             dialogues = []
             final_state = "stand"
 

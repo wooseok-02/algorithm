@@ -112,7 +112,8 @@ class BlackjackGUI:
         self.root.geometry("1200x800") # 창 크기 확장
         self.root.configure(bg="green")
 
-        self.card_images_pil = {}
+        self.card_images_pil = {}  # 리사이즈된 이미지 저장
+        self.card_images_original = {}  # 원본 이미지 저장 (BACK.png 크기 문제 해결용)
         self.card_images_tk_cached = {}
         self.card_size = (80, 120) # 카드 크기 축소 (공간 확보)
         self.load_card_images()
@@ -215,6 +216,15 @@ class BlackjackGUI:
             card_name = os.path.splitext(filename)[0]
             try:
                 img = Image.open(path).convert("RGBA")
+                
+                # BACK.png 특별 처리: 초록색 배경 제거 및 카드 영역만 추출
+                if card_name == "BACK":
+                    img = self._extract_card_from_background(img)
+                
+                # 원본 이미지 저장
+                self.card_images_original[card_name] = img.copy()
+                
+                # 모든 이미지를 정확히 card_size로 리사이즈 (비율 무시, 강제 크기 맞춤)
                 img_resized = img.resize(card_size, Image.LANCZOS)
                 self.card_images_pil[card_name] = img_resized
             except Exception as e:
@@ -223,6 +233,40 @@ class BlackjackGUI:
         if "BACK" not in self.card_images_pil:
             print(f"경고: '{IMAGE_DIR}/BACK.png' (뒷면) 이미지를 찾을 수 없습니다.")
 
+    def _extract_card_from_background(self, img):
+        """BACK.png에서 흰색 모서리를 기준으로 카드 영역만 추출"""
+        pixels = img.load()
+        width, height = img.size
+        
+        # 흰색 픽셀 찾기 (R, G, B 모두 220 이상)
+        white_threshold = 220
+        min_x, min_y = width, height
+        max_x, max_y = 0, 0
+        
+        for y in range(height):
+            for x in range(width):
+                r, g, b, a = pixels[x, y]
+                # 흰색 모서리 감지 (R, G, B 모두 220 이상)
+                if r >= white_threshold and g >= white_threshold and b >= white_threshold:
+                    min_x = min(min_x, x)
+                    min_y = min(min_y, y)
+                    max_x = max(max_x, x)
+                    max_y = max(max_y, y)
+        
+        # 흰색 모서리 영역이 발견되었으면 그 경계를 기준으로 자르기
+        if min_x < max_x and min_y < max_y:
+            # 약간의 여유 공간 추가 (흰색 모서리 내부 영역 포함)
+            padding = 2
+            min_x = max(0, min_x + padding)  # 내부로 약간 이동
+            min_y = max(0, min_y + padding)
+            max_x = min(width, max_x - padding)
+            max_y = min(height, max_y - padding)
+            
+            return img.crop((min_x, min_y, max_x, max_y))
+        
+        # 실패 시 원본 반환
+        return img
+    
     def _normalize_card_id(self, card):
         """Card 객체나 문자열을 이미지 키 문자열로 변환한다."""
         if isinstance(card, str):
@@ -251,7 +295,14 @@ class BlackjackGUI:
         if target_w <= 0:
             target_w = 1
 
-        pil_img = self.card_images_pil[card_key].resize((int(target_w), int(target_h)), Image.LANCZOS)
+        # 원본 이미지에서 리사이즈 (BACK.png 크기 문제 해결)
+        # 이미 리사이즈된 이미지를 다시 리사이즈하면 품질 저하 및 크기 불일치 발생
+        if card_key in self.card_images_original:
+            source_img = self.card_images_original[card_key]
+        else:
+            source_img = self.card_images_pil[card_key]
+        
+        pil_img = source_img.resize((int(target_w), int(target_h)), Image.LANCZOS)
         tk_img = ImageTk.PhotoImage(pil_img)
         self.card_images_tk_cached[key] = tk_img
         return tk_img
@@ -296,17 +347,43 @@ class BlackjackGUI:
         if npc_hands is not None:
             self.update_npc_hands(npc_hands, npc_dialogues)
 
-    def reveal_dealer_hand(self, dealer_final_hand: list):
-        """딜러 패를 순차적으로 뒤집으며 최종 카드 이미지를 보여준다."""
+    def reveal_dealer_hand(self, dealer_final_hand: list, on_complete=None):
+        """딜러 패를 순차적으로 뒤집으며 최종 카드 이미지를 보여준다.
+        
+        Args:
+            dealer_final_hand: 딜러의 최종 핸드
+            on_complete: 모든 카드가 뒤집힌 후 호출할 콜백 함수
+        """
         normalized = [self._normalize_card_id(card) for card in dealer_final_hand]
         self.current_dealer_hand_hidden = normalized
 
-        for idx, card_name in enumerate(normalized):
-            delay = idx * 350
-            self.root.after(delay, lambda i=idx, c=card_name: self.flip_dealer_card(i, c))
+        # 카드 뒤집기 속도 조정: 카드 간 간격을 500ms로 증가
+        card_flip_delay = 500
+        # 각 카드의 뒤집기 애니메이션 시간 계산 (steps * interval)
+        animation_steps = 12
+        animation_interval = 35  # 20에서 35로 증가하여 속도 감소
+        single_card_animation_time = animation_steps * 2 * animation_interval  # shrink + expand
+        
+        # 마지막 카드가 완전히 뒤집히는 시간 계산
+        last_card_start_delay = (len(normalized) - 1) * card_flip_delay
+        total_animation_time = last_card_start_delay + single_card_animation_time
 
-    def flip_dealer_card(self, index, final_card_name):
-        """카드 뒷면 이미지를 점진적으로 앞면으로 전환한다."""
+        for idx, card_name in enumerate(normalized):
+            delay = idx * card_flip_delay
+            self.root.after(delay, lambda i=idx, c=card_name: self.flip_dealer_card(i, c, animation_interval))
+        
+        # 모든 카드가 뒤집힌 후 1초 후에 콜백 호출
+        if on_complete:
+            self.root.after(total_animation_time + 1000, on_complete)
+
+    def flip_dealer_card(self, index, final_card_name, interval=35):
+        """카드 뒷면 이미지를 점진적으로 앞면으로 전환한다.
+        
+        Args:
+            index: 카드 인덱스
+            final_card_name: 최종 카드 이름
+            interval: 애니메이션 간격 (기본값 35ms, 기본값보다 느림)
+        """
         widgets = self.dealer_card_area.winfo_children()
         if index < 0 or index >= len(widgets):
             return
@@ -326,7 +403,6 @@ class BlackjackGUI:
 
         full_w, full_h = self.card_size
         steps = 12
-        interval = 20
 
         widths_shrink = [int(full_w * (1 - i / steps)) for i in range(steps)]
         if widths_shrink[-1] <= 0:
@@ -335,8 +411,10 @@ class BlackjackGUI:
 
         def do_shrink(i=0):
             if i >= len(widths_shrink):
-                if front_exists:
-                    tkimg_inner = self._get_tk_image(final_card_name, width=1)
+                # shrink 완료 후 expand 시작 - 첫 번째 expand 크기로 설정
+                if front_exists and len(widths_expand) > 0:
+                    first_expand_width = widths_expand[0]
+                    tkimg_inner = self._get_tk_image(final_card_name, width=first_expand_width)
                     if tkimg_inner:
                         label.config(image=tkimg_inner)
                         label.image = tkimg_inner
@@ -353,7 +431,8 @@ class BlackjackGUI:
 
         def do_expand(i=0):
             if i >= len(widths_expand):
-                final_img = self._get_tk_image(final_card_name)
+                # 최종 이미지는 원래 크기(full_w)로 명시적으로 설정
+                final_img = self._get_tk_image(final_card_name, width=full_w)
                 if final_img:
                     label.config(image=final_img)
                     label.image = final_img
@@ -543,5 +622,5 @@ def main_login_window():
         row=2, column=2, pady=20, padx=5, sticky="w"
     )
 
-    # 🚨 내부 command 연결은 Controller가 담당하므로 설정하지 않음
-    return login_win, username_entry, password_entry
+    # 버튼 객체도 함께 반환하여 컨트롤러에서 직접 연결할 수 있도록
+    return login_win, username_entry, password_entry, login_btn, signup_btn
