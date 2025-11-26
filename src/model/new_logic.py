@@ -68,12 +68,14 @@ class Deck:
 
 # 2. NPC 클래스 추가 (L-07)
 class NPC:
-    def __init__(self, name, npc_type, bet_amount):
+    def __init__(self, name, npc_type, bet_amount, balance=1000):
         self.name = name
         self.type = npc_type  # 'SAFE', 'AGGRESSIVE', 'UNIQUE'
         self.hand = []
         self.bet = bet_amount
+        self.balance = balance  # NPC의 잔액
         self.used_skill_this_round = False # 능동 스킬 사용 여부
+        self.round_completed = False
         
     def score(self, game_ref):
         """ BlackjackGame의 점수 계산 함수를 사용합니다. """
@@ -95,21 +97,32 @@ class BlackjackGame:
         'item_high': 80   # 6~10 카드 뽑기
     }
     
-    def __init__(self):
+    def __init__(self, npc_balances=None):
+        """
+        Args:
+            npc_balances: dict, NPC 이름을 키로 하고 잔액을 값으로 하는 딕셔너리
+                          예: {"NPC-1 (안정형)": 1000, "NPC-2 (공격형)": 800, ...}
+        """
         self.deck = Deck()
         self.player_hand = []
         self.dealer_hand = []
         self.bet_amount = 0 
         
-        # L-10 NPC 인스턴스 생성
+        # L-10 NPC 인스턴스 생성 (잔액 정보 포함)
+        if npc_balances is None:
+            npc_balances = {}
+        
         self.npcs = [
-            NPC("NPC-1 (안정형)", 'SAFE', 100), 
-            NPC("NPC-2 (공격형)", 'AGGRESSIVE', 100),
-            NPC("NPC-3 (특이형)", 'UNIQUE', 100)
+            NPC("NPC-1 (안정형)", 'SAFE', 100, npc_balances.get("NPC-1 (안정형)", 1000)), 
+            NPC("NPC-2 (공격형)", 'AGGRESSIVE', 100, npc_balances.get("NPC-2 (공격형)", 1000)),
+            NPC("NPC-3 (특이형)", 'UNIQUE', 100, npc_balances.get("NPC-3 (특이형)", 1000))
         ]
         
         # NPC의 정산 결과를 저장할 딕셔너리
-        self.npc_round_results = {} 
+        self.npc_round_results = {}
+        
+        # 공격형 NPC 패시브 발동 여부 추적 (라운드당 1회만)
+        self.aggressive_passive_used_this_round = False 
 
     # L-01 게임 세팅 (NPC 초기화 포함)
     def start_game(self, bet: int):
@@ -118,11 +131,21 @@ class BlackjackGame:
         self.player_hand = [self.deck.deal(), self.deck.deal()]
         self.dealer_hand = [self.deck.deal(), self.deck.deal()]
         
+        # 공격형 NPC 패시브 발동 여부 초기화
+        self.aggressive_passive_used_this_round = False
+        
         # L-12 NPC에게도 카드 지급 및 상태 초기화
         for npc in self.npcs:
+            # NPC 잔액이 100 이하이면 자동으로 100 충전
+            if npc.balance <= 100:
+                npc.balance = 100
+            
+            # NPC가 배팅할 수 있는 최대 금액은 잔액과 배팅 금액 중 작은 값
+            npc.bet = min(bet, npc.balance)
+            
             npc.hand = [self.deck.deal(), self.deck.deal()]
-            npc.bet = bet 
             npc.used_skill_this_round = False
+            npc.round_completed = False
             
         initial_dialogues = self.get_current_npc_dialogues()
         # GUI에 전달할 초기 상태 반환
@@ -198,6 +221,10 @@ class BlackjackGame:
 
     # L-19 공격형 NPC 패시브 체크 함수 (Controller에서 Stand 전에 호출)
     def check_aggressive_passive(self):
+        # 라운드당 1회만 발동되도록 체크
+        if self.aggressive_passive_used_this_round:
+            return False, "", None
+        
         player_score = self.calculate_score(self.player_hand)
         
         # 1. 플레이어 점수 17 이상 확인
@@ -214,19 +241,75 @@ class BlackjackGame:
         if npc_score < 17 or npc_score > 21:
             return False, "", aggressive_npc.name
             
-        # 3. 40% 확률 발동
-        if random.random() < 0.4:
+        # 3. 40% 확률 발동 (조건 만족 시 무조건 발동)
+        if random.random() < 0.6:
+            self.aggressive_passive_used_this_round = True  # 발동 플래그 설정
             return True, f"{aggressive_npc.name}의 패시브 발동! 플레이어 강제 HIT.", aggressive_npc.name
             
         return False, "", aggressive_npc.name
     
     # L-13 NPC 턴 (능동 스킬 + 대사)
-    def npcs_play_turn(self):
+    def npc_single_round_step(self):
+        """각 NPC가 한 번씩 행동하는 단계를 반환합니다."""
+        steps = []
+        for npc in self.npcs:
+            if getattr(npc, "round_completed", False):
+                continue
+            step = self._npc_take_step(npc)
+            if step:
+                steps.append(step)
+        return steps
+
+    def _npc_take_step(self, npc: NPC):
+        dialogues = []
+        score = self.calculate_score(npc.hand)
+
+        if score > 21:
+            dialogues.extend(self._npc_bust_lines(npc.type))
+            npc.round_completed = True
+            return {
+                "name": npc.name,
+                "hand": list(npc.hand),
+                "dialogues": dialogues,
+                "state": "bust"
+            }
+
+        if npc.type == 'AGGRESSIVE':
+            decision = self._play_aggressive_turn(npc, score, dialogues)
+        elif npc.type == 'SAFE':
+            decision = self._play_safe_turn(npc, score, dialogues)
+        else:
+            decision = self._play_unique_turn(npc, score, dialogues)
+
+        if decision != "continue":
+            npc.round_completed = True
+        else:
+            npc.round_completed = False
+
+        return {
+            "name": npc.name,
+            "hand": list(npc.hand),
+            "dialogues": dialogues,
+            "state": decision
+        }
+
+    def npcs_play_turn(self, capture_steps: bool = False):
         turn_results = {}
+        action_steps = [] if capture_steps else None
 
         for npc in self.npcs:
             dialogues = []
             final_state = "stand"
+
+            def record_step(state_label: str):
+                if action_steps is None:
+                    return
+                action_steps.append({
+                    "name": npc.name,
+                    "hand": list(npc.hand),
+                    "dialogues": list(dialogues),
+                    "state": state_label
+                })
 
             while True:
                 score = self.calculate_score(npc.hand)
@@ -234,6 +317,8 @@ class BlackjackGame:
                 if score > 21:
                     dialogues.extend(self._npc_bust_lines(npc.type))
                     final_state = "bust"
+                    npc.round_completed = True
+                    record_step("bust")
                     break
 
                 if npc.type == 'AGGRESSIVE':
@@ -243,10 +328,14 @@ class BlackjackGame:
                 else:
                     decision = self._play_unique_turn(npc, score, dialogues)
 
+                record_step(decision)
+
                 if decision == "continue":
+                    npc.round_completed = False
                     continue
 
                 final_state = decision
+                npc.round_completed = True
                 break
 
             turn_results[npc.name] = {
@@ -255,6 +344,9 @@ class BlackjackGame:
                 "final_score": self.calculate_score(npc.hand),
                 "state": final_state
             }
+
+        if capture_steps:
+            return turn_results, action_steps
 
         return turn_results
 
@@ -450,16 +542,21 @@ class BlackjackGame:
                 passive_dialogues[npc.name].append("[견제] 이런, 아쉽게 됐네요")
                 
             
+            # NPC 잔액 업데이트
+            npc.balance += npc_payout
+            
             npc_settlement_details[npc.name] = {
                 "result": npc_result,
                 "payout": npc_payout,
-                "score": npc_score
+                "score": npc_score,
+                "new_balance": npc.balance
             }
-            # Note: NPC 잔액 관리는 DB/Controller 쪽에서 담당한다고 가정하고 여기서는 payout만 계산합니다.
 
         # --- 3. 최종 플레이어 정산 ---
         final_player_payout = player_payout + teamwork_bonus - total_additional_loss
 
+        # NPC 잔액 정보 딕셔너리 생성
+        npc_balances = {npc.name: npc.balance for npc in self.npcs}
 
         return {
             "result_msg": player_result, 
@@ -471,8 +568,13 @@ class BlackjackGame:
             "npc_results": npc_settlement_details,
             "passive_dialogues": passive_dialogues,
             "teamwork_bonus": teamwork_bonus,
-            "unique_penalty": total_additional_loss
+            "unique_penalty": total_additional_loss,
+            "npc_balances": npc_balances
         }
 
     def get_current_npc_dialogues(self):
         return {npc.name: self._npc_preview_dialogue(npc) for npc in self.npcs}
+    
+    def get_npc_balances(self):
+        """현재 NPC들의 잔액 정보를 반환합니다."""
+        return {npc.name: npc.balance for npc in self.npcs}

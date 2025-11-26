@@ -16,12 +16,6 @@ SUIT_SYMBOL_TO_LETTER = {
     "♦": "D",
 }
 # USERS_FILE = os.path.join(BASE_DIR, "users.json") (제거)
-
-# ----------------------
-# 간단한 사용자 저장소 (파일 기반) 로직 모두 제거
-# ----------------------
-
-# =========================
 # 랭킹창 (View)
 # =========================
 def open_ranking_window():
@@ -44,9 +38,23 @@ def populate_ranking_data(data_frame, rank_data):
         return
     
     # data_frame의 기존 위젯을 지우는 로직이 Controller에서 필요하지 않다면 생략
-    for rank, (name, score) in enumerate(rank_data, 1):
+    for rank, data in enumerate(rank_data, 1):
+        # 데이터 형식: (name, bankroll, type) 또는 (name, bankroll) (하위 호환성)
+        if len(data) == 3:
+            name, score, rank_type = data
+        else:
+            name, score = data
+            rank_type = 'player'  # 기본값
+        
         medal = "🥇" if rank==1 else "🥈" if rank==2 else "🥉" if rank==3 else f"{rank}."
-        text = f"{medal} {name}: ${score}"
+        
+        # NPC인 경우 아이콘 추가
+        if rank_type == 'npc':
+            icon = "🤖"
+            text = f"{medal} {icon} {name}: ${score}"
+        else:
+            text = f"{medal} {name}: ${score}"
+        
         tk.Label(data_frame, text=text, font=("Dotum",12), anchor="w").pack(fill="x", pady=2, padx=20)
 
 
@@ -110,6 +118,7 @@ class BlackjackGUI:
         self.load_card_images()
         self.current_dealer_hand_hidden = []
 
+
         # --- 상단 버튼 및 상태 ---
         top_frame = tk.Frame(self.root, bg="green")
         top_frame.pack(fill="x", pady=5)
@@ -127,26 +136,28 @@ class BlackjackGUI:
         tk.Label(self.root, text="NPC 플레이어들", bg="green", fg="yellow", font=("Arial", 14, "bold")).pack(pady=(10,0))
         self.npc_frame = tk.Frame(self.root, bg="green", width=1000)
         self.npc_frame.pack(pady=5, fill="x")
+        self.npc_inner_frame = tk.Frame(self.npc_frame, bg="green")
+        self.npc_inner_frame.pack(anchor="center")
 
         self.npc_card_frames = {} # NPC 카드 라벨 저장소
         self.npc_dialogue_labels = {}
+        self.npc_balance_labels = {}  # NPC 잔액 라벨 저장소
+        self.npc_bet_labels = {}  # NPC 배팅 금액 라벨 저장소
         self.npc_sections = {}
 
         # --- 2. 딜러 구역 (원본 유지) ---
         tk.Label(self.root, text="딜러", bg="green", fg="white", font=("Arial", 14, "bold")).pack(pady=(10,0))
-        self.dealer_frame = tk.Frame(self.root, bg="green", height=130, width=800)
+        self.dealer_frame = tk.Frame(self.root, bg="green", width=800)
         self.dealer_frame.pack(pady=5, fill="x")
-        self.dealer_frame.pack_propagate(False)
         self.dealer_card_area = tk.Frame(self.dealer_frame, bg="green")
-        self.dealer_card_area.place(relx=0.5, rely=0.5, anchor="center")
+        self.dealer_card_area.pack(expand=True)
 
         # --- 3. 플레이어 구역 (원본 유지) ---
         tk.Label(self.root, text=f"{user_data['username']}", bg="green", fg="white", font=("Arial", 14, "bold")).pack(pady=(10,0))
-        self.player_frame = tk.Frame(self.root, bg="green", height=130, width=800)
+        self.player_frame = tk.Frame(self.root, bg="green", width=800)
         self.player_frame.pack(pady=5, fill="x")
-        self.player_frame.pack_propagate(False)
         self.player_card_area = tk.Frame(self.player_frame, bg="green")
-        self.player_card_area.place(relx=0.5, rely=0.5, anchor="center")
+        self.player_card_area.pack(expand=True)
 
         # --- 4. 버튼 및 아이템 구역 ---
         self.button_frame = tk.Frame(self.root, bg="green")
@@ -155,30 +166,39 @@ class BlackjackGUI:
         # 🌟 아이템 버튼 추가
         item_frame = tk.Frame(self.button_frame, bg="green")
         item_frame.pack(side="left", padx=20)
-        self.item_low_button = tk.Button(item_frame, text="🛒 Item 1 (1~5)", font=("Arial", 10), width=12)
+        self.item_low_button = tk.Button(item_frame, text="🛒 Item 1 (1~5)", font=("Arial", 17), width=12)
         self.item_low_button.pack(side="left", padx=5)
-        self.item_high_button = tk.Button(item_frame, text="🛒 Item 2 (6~10)", font=("Arial", 10), width=12)
+        self.item_high_button = tk.Button(item_frame, text="🛒 Item 2 (6~10)", font=("Arial", 17), width=12)
         self.item_high_button.pack(side="left", padx=5)
 
         # 게임 액션 버튼 (원본 유지)
         action_frame = tk.Frame(self.button_frame, bg="green")
         action_frame.pack(side="left", padx=20)
-        self.hit_button = tk.Button(action_frame, text="Hit", font=("Arial", 14), width=10)
+        self.hit_button = tk.Button(action_frame, text="Hit", font=("Arial", 18), width=10)
         self.hit_button.pack(side="left", padx=5)
-        self.stand_button = tk.Button(action_frame, text="Stand", font=("Arial", 14), width=10)
+        self.stand_button = tk.Button(action_frame, text="Stand", font=("Arial", 18), width=10)
         self.stand_button.pack(side="left", padx=5)
         
         # 🚨 수정: Double/Split/Surrender 버튼 제거 (기획에서 제외)
-        self.reset_button = tk.Button(action_frame, text="New Round", font=("Arial", 14), width=10, state="disabled")
+        self.reset_button = tk.Button(action_frame, text="New Round", font=("Arial", 18), width=10, state="disabled")
         self.reset_button.pack(side="left", padx=5)
-
-
         dummy_player_hand = ['C_2', 'C_3']
         dummy_dealer_hand = ['BACK', 'BACK']
-        self.update_gui_cards(dummy_player_hand, dummy_dealer_hand) # NPC hands 제거
+        self.update_gui_cards(dummy_player_hand, dummy_dealer_hand)
+        self._center_window(self.root)
 
-        # 🚨 수정: 데모 애니메이션 호출 제거 (Controller가 제어)
-        # self.root.after(...) 관련 코드 모두 제거
+    def update_chip_label(self, amount: int):
+        """게임 상단 칩 표시를 갱신합니다."""
+        self.chip_label.config(text=f"남은 돈: ${amount}")
+
+    def _center_window(self, win):
+        """ 창을 화면의 중앙에 배치합니다. """
+        win.update_idletasks()
+        width = win.winfo_width()
+        height = win.winfo_height()
+        x = (win.winfo_screenwidth() // 2) - (width // 2)
+        y = (win.winfo_screenheight() // 2) - (height // 2)
+        win.geometry(f'{width}x{height}+{x}+{y}')
 
     # --- 기존 메서드 (원본 유지) ---
     def load_card_images(self):
@@ -237,8 +257,18 @@ class BlackjackGUI:
         return tk_img
         
     # 🌟 수정: NPC 인수를 받도록 시그니처 확장 및 NPC 업데이트 위임
-    def update_gui_cards(self, player_hand: list, dealer_hand: list, npc_hands: dict = None, npc_dialogues: dict = None):
-        """ 플레이어, 딜러의 패를 업데이트하고, NPC의 패 업데이트를 위임합니다. """
+    def update_gui_cards(
+        self,
+        player_hand: list,
+        dealer_hand: list,
+        npc_hands: dict = None,
+        npc_dialogues: dict = None,
+        highlight_player_card=None,
+    ):
+        """ 플레이어, 딜러, NPC 패를 업데이트합니다. highlight_player_card는 화면에서 강조할 카드입니다. """
+        highlight_key = None
+        if highlight_player_card is not None:
+            highlight_key = self._normalize_card_id(highlight_player_card)
         
         # (딜러 패 업데이트 로직 유지)
         for widget in self.dealer_card_area.winfo_children():
@@ -254,8 +284,11 @@ class BlackjackGUI:
         for widget in self.player_card_area.winfo_children():
             widget.destroy()
         for card_name in player_hand:
+            card_key = self._normalize_card_id(card_name)
             tkimg = self._get_tk_image(card_name)
             lbl = tk.Label(self.player_card_area, image=tkimg, bg="green")
+            if highlight_key and card_key == highlight_key:
+                lbl.config(highlightbackground="#ffd700", highlightthickness=3, bd=2)
             if tkimg: lbl.image = tkimg
             lbl.pack(side="left", padx=5)
             
@@ -336,15 +369,40 @@ class BlackjackGUI:
         do_shrink(0)
 
     # 🌟 신규 메서드: NPC 핸드 업데이트 추가
-    def update_npc_hands(self, npc_hands: dict, npc_dialogues: dict = None):
+    def update_npc_hands(self, npc_hands: dict, npc_dialogues: dict = None, npc_balances: dict = None, npc_bets: dict = None):
         """ NPC 플레이어들의 패와 대사를 업데이트합니다. """
         for name, hand in npc_hands.items():
             section = self.npc_sections.get(name)
             if section is None:
-                npc_sub_frame = tk.Frame(self.npc_frame, bg="green", padx=10, pady=5)
+                npc_sub_frame = tk.Frame(self.npc_inner_frame, bg="green", padx=10, pady=5)
                 npc_sub_frame.pack(side="left", padx=15, fill="y")
 
-                tk.Label(npc_sub_frame, text=name, bg="green", fg="white", font=("Arial", 12, "bold")).pack()
+                # NPC 이름 라벨
+                name_label = tk.Label(npc_sub_frame, text=name, bg="green", fg="white", font=("Arial", 12, "bold"))
+                name_label.pack()
+                
+                # NPC 잔액 라벨
+                balance_label = tk.Label(
+                    npc_sub_frame, 
+                    text="잔액: $0", 
+                    bg="green", 
+                    fg="yellow", 
+                    font=("Arial", 10, "bold")
+                )
+                balance_label.pack()
+                self.npc_balance_labels[name] = balance_label
+                
+                # NPC 배팅 금액 라벨
+                bet_label = tk.Label(
+                    npc_sub_frame, 
+                    text="배팅: $0", 
+                    bg="green", 
+                    fg="cyan", 
+                    font=("Arial", 10)
+                )
+                bet_label.pack()
+                self.npc_bet_labels[name] = bet_label
+                
                 card_frame = tk.Frame(npc_sub_frame, bg="green")
                 card_frame.pack(pady=(4, 2))
 
@@ -390,6 +448,14 @@ class BlackjackGUI:
                 dialogue_lines = npc_dialogues[name]
             dialogue_text = "\n".join(dialogue_lines) if dialogue_lines else " "
             self.npc_dialogue_labels[name].config(text=dialogue_text)
+            
+            # NPC 잔액 및 배팅 금액 업데이트
+            if npc_balances and name in npc_balances:
+                if name in self.npc_balance_labels:
+                    self.npc_balance_labels[name].config(text=f"잔액: ${npc_balances[name]}")
+            if npc_bets and name in npc_bets:
+                if name in self.npc_bet_labels:
+                    self.npc_bet_labels[name].config(text=f"배팅: ${npc_bets[name]}")
 
     def update_npc_dialogues_only(self, npc_dialogues: dict):
         if not npc_dialogues:
@@ -399,6 +465,15 @@ class BlackjackGUI:
                 continue
             text = "\n".join(lines) if lines else " "
             self.npc_dialogue_labels[name].config(text=text)
+    
+    def update_npc_balances_and_bets(self, npc_balances: dict, npc_bets: dict):
+        """NPC 잔액과 배팅 금액만 업데이트합니다."""
+        for name, balance in npc_balances.items():
+            if name in self.npc_balance_labels:
+                self.npc_balance_labels[name].config(text=f"잔액: ${balance}")
+        for name, bet in npc_bets.items():
+            if name in self.npc_bet_labels:
+                self.npc_bet_labels[name].config(text=f"배팅: ${bet}")
 
     # 🌟 신규 메서드: 아이템 버튼 상태 제어 추가
     def set_item_button_state(self, state: str):

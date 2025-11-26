@@ -404,4 +404,4 @@
 # # ----- 단독 실행 편의 -----
 # if __name__ == "__main__":
 #     win, _, _ = main_login_window()
-#     win.mainloop()
+#     win.mainloop()"

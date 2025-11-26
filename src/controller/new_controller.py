@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
 import hashlib
 import os
 import sqlite3
@@ -133,6 +133,7 @@ class MainMenuController:
         """ 메인 메뉴를 '생성'하고 '이벤트'를 '연결'합니다. """
         # View의 MainMenu가 Toplevel로 바뀌었으므로 master_win을 전달합니다.
         self.view = view.MainMenu(self.master_win, self.user_data)
+        self.view.controller = self  # GameController가 메인 컨트롤러에 접근할 수 있도록 참조 저장
         
         # 'view'의 버튼들에 'controller'의 함수를 '연결(bind)'
         self.view.charge_button.config(command=self.charge_chips)
@@ -156,6 +157,7 @@ class MainMenuController:
             return
         
         self.view.withdraw() # 메인메뉴(View) 숨기기
+        self.user_data["bankroll"] = self.chips
         
         # [흐름] '게임 컨트롤러' 실행
         game_controller = GameController(self.view, self.user_data, bet)
@@ -171,6 +173,7 @@ class MainMenuController:
             conn.close()
             
             self.chips = new_bankroll
+            self.user_data["bankroll"] = self.chips
             self.view.update_chip_label(self.chips) 
             messagebox.showinfo("충전 완료", "100칩이 충전되었습니다.")
             
@@ -217,9 +220,16 @@ class GameController:
         self.current_npc_dialogues = {}
         self.force_action_pending = False
         self.item_used_this_round = False
+        self.pending_npc_turn_summary = None
+        self.npc_step_delay_ms = 2000
+        self._resolving_round = False
+        self.npc_balances = {}  # NPC 잔액 저장
 
-        # '모델'('룰') 객체 생성
-        self.game_model = gc.BlackjackGame() 
+        # NPC 잔액 로드
+        self._load_npc_balances()
+        
+        # '모델'('룰') 객체 생성 (NPC 잔액 정보 전달)
+        self.game_model = gc.BlackjackGame(npc_balances=self.npc_balances)
         self.current_bankroll = user_data["bankroll"]
         
         self.view = None 
@@ -240,6 +250,38 @@ class GameController:
         self.view.item_high_button.config(command=lambda: self.handle_item_use('item_high'))
 
         self.start_new_game()
+    
+    def _load_npc_balances(self):
+        """DB에서 NPC 잔액을 로드합니다."""
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            npc_data = db.get_all_npcs(conn)
+            conn.close()
+            
+            self.npc_balances = {}
+            for name, npc_type, balance in npc_data:
+                # NPC 잔액이 100 이하이면 자동으로 100 충전
+                if balance <= 100:
+                    balance = 100
+                    self._update_npc_balance_in_db(name, balance)
+                self.npc_balances[name] = balance
+        except Exception as e:
+            print(f"NPC 잔액 로드 실패: {e}")
+            # 기본값 설정
+            self.npc_balances = {
+                "NPC-1 (안정형)": 1000,
+                "NPC-2 (공격형)": 1000,
+                "NPC-3 (특이형)": 1000
+            }
+    
+    def _update_npc_balance_in_db(self, npc_name: str, new_balance: int):
+        """DB에 NPC 잔액을 업데이트합니다."""
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            db.update_npc_bankroll(conn, npc_name, new_balance)
+            conn.close()
+        except Exception as e:
+            print(f"NPC 잔액 업데이트 실패: {e}")
 
     def start_new_game(self):
         """ [컨트롤러] 새 게임 시작 로직 """
@@ -247,27 +289,46 @@ class GameController:
         self.player_stood = False
         self.force_action_pending = False
         self.item_used_this_round = False
+        self.pending_npc_turn_summary = None
+        self._resolving_round = False
         self.view.set_item_button_state("normal") # 아이템 버튼 활성화
 
+        # NPC 잔액 다시 로드 (자동 충전 확인)
+        self._load_npc_balances()
+        
+        # 게임 모델에 NPC 잔액 전달
+        self.game_model = gc.BlackjackGame(npc_balances=self.npc_balances)
+        
         # '모델'('룰') 호출
         initial_state = self.game_model.start_game(bet=self.bet_amount)
         
-        # 🌟 View에 카드 그리기 '요청' (NPC 핸드 포함)
+        # NPC 배팅 금액 정보 생성
+        npc_bets = {npc.name: npc.bet for npc in self.game_model.npcs}
+        
+        # 🌟 View에 카드 그리기 '요청' (NPC 핸드, 잔액, 배팅 포함)
         self.view.update_gui_cards(
             initial_state['player_hand'], 
             initial_state['dealer_hand_hidden'],
             initial_state.get('npc_hands', {}),
             initial_state.get('npc_dialogues', {})
         )
+        
+        # NPC 잔액 및 배팅 금액 업데이트
+        npc_balances_dict = self.game_model.get_npc_balances()
+        self.view.update_npc_balances_and_bets(npc_balances_dict, npc_bets)
 
         self.current_npc_visible_hands = copy.deepcopy(initial_state.get('npc_hands', {}))
         self.current_npc_dialogues = copy.deepcopy(initial_state.get('npc_dialogues', {}))
         
         player_score = self.game_model.calculate_score(initial_state['player_hand'])
-        self.view.status_label.config(text=f"플레이어 점수: {player_score}. Hit / Stand?")
+        self.view.status_label.config(text=f"베팅: ${self.bet_amount} / 플레이어 점수: {player_score}. Hit / Stand?")
+        self.view.update_chip_label(self.current_bankroll - self.bet_amount)
+        self.view.hit_button.config(state="normal")
+        self.view.stand_button.config(state="normal")
+        self.view.reset_button.config(state="disabled")
 
     def handle_item_use(self, item_type: str):
-        """ [컨트롤러] 아이템 구매 및 사용 로직 """
+        """ [컨트롤러] 아이템 구매 및 사용 로직 (카드 표시 + 상태 갱신) """
         if self.game_is_over:
             return
 
@@ -276,29 +337,37 @@ class GameController:
         if result['status'] == 'InsufficientFunds':
             messagebox.showerror("구매 실패", f"잔액이 부족합니다. 필요한 칩: {result['cost']}")
             return
-        elif result['status'] == 'InvalidItem':
+        if result['status'] == 'InvalidItem':
             messagebox.showerror("오류", "잘못된 아이템입니다.")
             return
 
-        self.current_bankroll -= result['cost'] # 비용 차감
-        self.view.update_chip_label(self.current_bankroll) 
+        self.current_bankroll -= result['cost']
+        self.view.update_chip_label(self.current_bankroll)
+
         self.view.update_gui_cards(
             result['player_hand'],
             self.view.current_dealer_hand_hidden,
             self.current_npc_visible_hands,
-            self.current_npc_dialogues
+            self.current_npc_dialogues,
+            highlight_player_card=result['new_card']
         )
+        self.view.root.update_idletasks()
+
         self._refresh_npc_dialogues()
-        
+
         self.view.status_label.config(text=f"아이템 사용! {result['new_card']} 받음. 현재 점수: {result['score']}")
+
         self.item_used_this_round = True
-        self.view.set_item_button_state("disabled") # 아이템 라운드당 1회 사용
+        self.view.set_item_button_state("disabled")
 
         if self.force_action_pending and not self.game_is_over:
             self._complete_forced_action_requirement("아이템 사용으로 패시브 조건을 충족했습니다. 다시 Stand가 가능합니다.")
 
         if 'Bust' in result['status']:
-            self.finalize_game(result="Lose (Bust)", payout=-self.bet_amount)
+            self.view.status_label.config(text=f"Bust! (점수: {result['score']}) 😭")
+            self.player_stood = True
+            self._disable_player_controls()
+            self._start_resolution_pipeline()
 
 
     def handle_hit(self):
@@ -312,17 +381,17 @@ class GameController:
             hit_result['player_hand'],
             self.view.current_dealer_hand_hidden,
             self.current_npc_visible_hands,
-            self.current_npc_dialogues
+            self.current_npc_dialogues,
+            highlight_player_card=hit_result['new_card']
         )
         self._refresh_npc_dialogues()
         self.view.status_label.config(text=f"새 카드! 현재 점수: {hit_result['score']}")
 
-        if self.force_action_pending and not self.game_is_over:
-            self._complete_forced_action_requirement("Hit을 수행했습니다. 다시 Stand가 가능합니다.")
-
         if hit_result['status'] == 'Bust':
             self.view.status_label.config(text=f"Bust! (점수: {hit_result['score']}) 😭")
-            self.finalize_game(result="Lose (Bust)", payout=-self.bet_amount)
+            self.player_stood = True
+            self._disable_player_controls()
+            self._start_resolution_pipeline()
 
     def handle_stand(self):
         """ [컨트롤러] Stand 로직 (공격형 NPC 패시브 체크 포함) """
@@ -331,9 +400,7 @@ class GameController:
         
         self.player_stood = True
         self.view.status_label.config(text="Stand! 결과를 기다리는 중...")
-        self.view.hit_button.config(state="disabled")
-        self.view.stand_button.config(state="disabled")
-        self.view.set_item_button_state("disabled")
+        self._disable_player_controls()
 
         # 🌟 L-22: 공격형 NPC 패시브 체크 (Model 호출)
         is_passive_triggered, msg, aggressive_name = self.game_model.check_aggressive_passive()
@@ -343,54 +410,7 @@ class GameController:
             self._enter_forced_action_state(aggressive_name)
             return 
         
-        # --- 정상적인 라운드 종료 ---
-        
-        # 🌟 L-23: NPC 턴 실행 (Model 호출)
-        npc_turn_summary = self.game_model.npcs_play_turn()
-        npc_hands = {name: data["hand"] for name, data in npc_turn_summary.items()}
-        npc_dialogues = {name: data.get("dialogues", []) for name, data in npc_turn_summary.items()}
-
-        # NPC의 최종 패/대사 업데이트
-        self.view.update_gui_cards(
-            self.game_model.player_hand,
-            self.view.current_dealer_hand_hidden,
-            npc_hands,
-            npc_dialogues
-        )
-        self.current_npc_visible_hands = copy.deepcopy(npc_hands)
-        self.current_npc_dialogues = copy.deepcopy(npc_dialogues)
-
-        # 딜러 턴
-        dealer_final_hand = self.game_model.dealer_turn()
-        hidden_back_list = ['BACK'] * len(dealer_final_hand)
-        self.view.update_gui_cards(
-            self.game_model.player_hand,
-            hidden_back_list,
-            self.current_npc_visible_hands,
-            self.current_npc_dialogues
-        )
-        self.view.reveal_dealer_hand(dealer_final_hand)
-        
-        # 최종 정산
-        final_result = self.game_model.check_result()
-        
-        self.npc_final_settlement = final_result['npc_results'] # NPC 정산 결과 저장
-        
-        result_msg = final_result['result_msg']
-        p_score = final_result['player_score']
-        d_score = final_result['dealer_score']
-        
-        npc_res_msg = ", ".join([f"{name}: {details['result']}" for name, details in self.npc_final_settlement.items()])
-        self.view.status_label.config(text=f"결과: {result_msg}! (P:{p_score} vs D:{d_score}) / NPC: {npc_res_msg}")
-        passive_dialogues = final_result.get('passive_dialogues', {})
-        if passive_dialogues:
-            for name, lines in passive_dialogues.items():
-                if lines:
-                    self.current_npc_dialogues[name] = lines
-            self.view.update_npc_dialogues_only(passive_dialogues)
-
-        # 정산 로직으로 이동
-        self.finalize_game(result=final_result['result_msg'], payout=final_result['payout'])
+        self._start_resolution_pipeline()
 
     def finalize_game(self, result: str, payout: int):
         """ [컨트롤러] 게임 종료 및 DB 저장 로직 (NPC 결과 반영) """
@@ -421,7 +441,31 @@ class GameController:
             messagebox.showerror("DB 오류", f"게임 결과 저장 실패: {e}")
     
     def reset_game(self):
-        self.back_to_main() 
+        """새 라운드를 같은 창에서 바로 시작한다."""
+        if self.view is None:
+            return
+        if not self.game_is_over:
+            messagebox.showinfo("알림", "게임이 끝난 후에만 새 라운드를 시작할 수 있습니다.")
+            return
+
+        new_bet = simpledialog.askinteger(
+            "새 라운드",
+            "베팅 금액을 입력하세요:",
+            initialvalue=self.bet_amount,
+            minvalue=1,
+            parent=self.view.root,
+        )
+        if new_bet is None:
+            return
+        if new_bet > self.current_bankroll:
+            messagebox.showwarning("베팅 오류", "보유 칩보다 많은 금액을 베팅할 수 없습니다.")
+            return
+
+        self.bet_amount = new_bet
+        # NPC 잔액 다시 로드 (자동 충전 확인)
+        self._load_npc_balances()
+        self.game_model = gc.BlackjackGame(npc_balances=self.npc_balances)
+        self.start_new_game()
 
     def back_to_main(self):
         """ [컨트롤러] 메인 메뉴 복귀 로직 """
@@ -439,6 +483,135 @@ class GameController:
         self.main_window_view.chips = self.current_bankroll
         self.main_window_view.update_chip_label(self.current_bankroll) 
         self.main_window_view.deiconify()
+        controller_ref = getattr(self.main_window_view, "controller", None)
+        if controller_ref is not None:
+            controller_ref.chips = self.current_bankroll
+            controller_ref.user_data["bankroll"] = self.current_bankroll
+
+    def _disable_player_controls(self):
+        self.view.hit_button.config(state="disabled")
+        self.view.stand_button.config(state="disabled")
+        self.view.set_item_button_state("disabled")
+
+    def _start_resolution_pipeline(self):
+        if self._resolving_round:
+            return
+        self._resolving_round = True
+        npc_turn_summary, npc_steps = self.game_model.npcs_play_turn(capture_steps=True)
+        self.pending_npc_turn_summary = npc_turn_summary
+        steps_queue = list(npc_steps or [])
+        self._play_npc_steps(steps_queue, self._after_npc_phase)
+
+    def _play_npc_steps(self, steps_queue: list, on_complete):
+        if not steps_queue:
+            npc_balances = self.game_model.get_npc_balances()
+            npc_bets = {npc.name: npc.bet for npc in self.game_model.npcs}
+            self.view.update_npc_hands(self.current_npc_visible_hands, self.current_npc_dialogues, npc_balances, npc_bets)
+            on_complete()
+            return
+
+        step = steps_queue.pop(0)
+        name = step.get("name")
+        if name:
+            self.current_npc_visible_hands[name] = step.get("hand", [])
+            self.current_npc_dialogues[name] = step.get("dialogues", [])
+        npc_balances = self.game_model.get_npc_balances()
+        npc_bets = {npc.name: npc.bet for npc in self.game_model.npcs}
+        self.view.update_npc_hands(self.current_npc_visible_hands, self.current_npc_dialogues, npc_balances, npc_bets)
+        self.view.root.after(self.npc_step_delay_ms, lambda: self._play_npc_steps(steps_queue, on_complete))
+
+    def _after_npc_phase(self):
+        if self.pending_npc_turn_summary:
+            for name, data in self.pending_npc_turn_summary.items():
+                if "hand" in data:
+                    self.current_npc_visible_hands[name] = data["hand"]
+                if "dialogues" in data:
+                    self.current_npc_dialogues[name] = data["dialogues"]
+            npc_balances = self.game_model.get_npc_balances()
+            npc_bets = {npc.name: npc.bet for npc in self.game_model.npcs}
+            self.view.update_npc_hands(self.current_npc_visible_hands, self.current_npc_dialogues, npc_balances, npc_bets)
+        self.pending_npc_turn_summary = None
+        self._run_dealer_phase_and_finalize()
+
+    def _run_dealer_phase_and_finalize(self):
+        dealer_final_hand = self.game_model.dealer_turn()
+        actual_dealer_list = [self.view._normalize_card_id(card) for card in dealer_final_hand]
+        self.view.update_gui_cards(
+            self.game_model.player_hand,
+            actual_dealer_list,
+            self.current_npc_visible_hands,
+            self.current_npc_dialogues
+        )
+        
+        final_result = self.game_model.check_result()
+        self.npc_final_settlement = final_result['npc_results']
+        
+        # NPC 잔액 업데이트 (DB에 저장)
+        npc_balances = final_result.get('npc_balances', {})
+        for npc_name, new_balance in npc_balances.items():
+            # NPC 잔액이 100 이하이면 자동으로 100 충전
+            if new_balance <= 100:
+                new_balance = 100
+            self._update_npc_balance_in_db(npc_name, new_balance)
+            self.npc_balances[npc_name] = new_balance
+        
+        # UI에 NPC 잔액 업데이트
+        npc_bets = {npc.name: npc.bet for npc in self.game_model.npcs}
+        self.view.update_npc_balances_and_bets(npc_balances, npc_bets)
+        
+        result_msg = final_result['result_msg']
+        p_score = final_result['player_score']
+        d_score = final_result['dealer_score']
+        
+        npc_res_msg = ", ".join([f"{name}: {details['result']}" for name, details in self.npc_final_settlement.items()])
+        self.view.status_label.config(text=f"결과: {result_msg}! (P:{p_score} vs D:{d_score}) / NPC: {npc_res_msg}")
+        passive_dialogues = final_result.get('passive_dialogues', {})
+        if passive_dialogues:
+            for name, lines in passive_dialogues.items():
+                if lines:
+                    self.current_npc_dialogues[name] = lines
+            self.view.update_npc_dialogues_only(passive_dialogues)
+
+        self.finalize_game(result=final_result['result_msg'], payout=final_result['payout'])
+        self._resolving_round = False
+        self._show_final_summary(final_result)
+
+    def _show_final_summary(self, final_result: dict):
+        """라운드 종료 후 결과/패시브/잔액 요약을 메시지 박스로 보여준다."""
+        lines = []
+        result_msg = final_result.get('result_msg', '결과 미상')
+        p_score = final_result.get('player_score', '-')
+        d_score = final_result.get('dealer_score', '-')
+        payout = final_result.get('payout', 0)
+
+        lines.append(f"플레이어 결과: {result_msg} (P:{p_score} vs D:{d_score})")
+        lines.append(f"베팅: ${self.bet_amount} / 정산: {payout:+}")
+
+        npc_lines = []
+        for name, details in (self.npc_final_settlement or {}).items():
+            npc_lines.append(f"- {name}: {details.get('result', '결과 미상')}")
+        if npc_lines:
+            lines.append("")
+            lines.append("NPC 결과:")
+            lines.extend(npc_lines)
+
+        passive_dialogues = final_result.get('passive_dialogues', {})
+        passive_lines = []
+        for name, texts in passive_dialogues.items():
+            if not texts:
+                continue
+            passive_lines.append(f"- {name}: " + " / ".join(texts))
+        lines.append("")
+        if passive_lines:
+            lines.append("NPC 패시브:")
+            lines.extend(passive_lines)
+        else:
+            lines.append("NPC 패시브: 발동 없음")
+
+        lines.append("")
+        lines.append(f"남은 돈: ${self.current_bankroll}")
+
+        messagebox.showinfo("라운드 요약", "\n".join(lines), parent=self.view.root)
 
     def _enter_forced_action_state(self, aggressive_name: str):
         self.force_action_pending = True

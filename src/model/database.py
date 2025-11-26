@@ -1,4 +1,5 @@
 import sqlite3
+from typing import List, Optional, Tuple
 
 # 데이터베이스 파일 이름을 바꾸고 싶을 때 이 한 줄만 바꾸면 됨.
 DB_FILE = "blackjack.db"    
@@ -30,6 +31,25 @@ def initialize_db(conn):
         FOREIGN KEY(player_id) REFERENCES users(id)  -- users 테이블의 id를 참조
     )
     """)
+    
+    # NPC 정보를 저장하는 npcs 테이블 생성
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS npcs (
+        npc_id INTEGER PRIMARY KEY AUTOINCREMENT, -- NPC의 고유 번호 (자동 증가)
+        name TEXT UNIQUE NOT NULL,                -- NPC 이름 (중복 불가)
+        npc_type TEXT NOT NULL,                   -- NPC 타입 ('SAFE', 'AGGRESSIVE', 'UNIQUE')
+        bankroll INTEGER DEFAULT 1000              -- NPC의 보유 칩 (기본값 1000)
+    )
+    """)
+    
+    # 초기 NPC 데이터 삽입 (이미 존재하지 않는 경우만)
+    npc_names = ["NPC-1 (안정형)", "NPC-2 (공격형)", "NPC-3 (특이형)"]
+    npc_types = ["SAFE", "AGGRESSIVE", "UNIQUE"]
+    for name, npc_type in zip(npc_names, npc_types):
+        cur.execute("SELECT COUNT(*) FROM npcs WHERE name=?", (name,))
+        if cur.fetchone()[0] == 0:
+            cur.execute("INSERT INTO npcs (name, npc_type, bankroll) VALUES (?, ?, ?)", (name, npc_type, 1000))
+    
     conn.commit()    
 
 def create_user(conn, username: str, hashed_password: str, salt: str) -> bool:
@@ -56,7 +76,7 @@ def create_user(conn, username: str, hashed_password: str, salt: str) -> bool:
         return False
     
 
-def get_user_by_username(conn, username: str) -> tuple | None:
+def get_user_by_username(conn, username: str) -> Optional[Tuple[int, bytes, bytes, int]]:
     """[로직 팀이 호출] 사용자 이름으로 (id, 해시, 솔트, 칩) 정보를 조회합니다.
 
     Args:
@@ -101,15 +121,70 @@ def save_game(conn, player_id: int, bet: int, result: str, payout: int):
     conn.commit()
 
 
-def get_ranking(conn) -> list[tuple]: 
-    """칩(bankroll) 보유량 기준 상위 10명의 랭킹을 조회합니다.
+def get_ranking(conn) -> List[Tuple[str, int, str]]: 
+    """칩(bankroll) 보유량 기준 상위 10명의 랭킹을 조회합니다 (플레이어 + NPC 포함).
 
     Returns:
-        list[tuple]: (username, bankroll) 튜플이 담긴 리스트를 반환합니다.
+        list[tuple]: (name, bankroll, type) 튜플이 담긴 리스트를 반환합니다.
+                    type은 'player' 또는 'npc'입니다.
     """
     cur = conn.cursor()
-    cur.execute("SELECT username, bankroll FROM users ORDER BY bankroll DESC LIMIT 10") 
-    # users 테이블에서 모든 사용자의 username과 bankroll을 선택(SELECT)
-    # 선택된 결과를 bankroll 기준으로 정렬(ORDER BY)하는데, DESC(내림차순)니까 많은 사람부터 적은 사람 순으로 정렬
+    
+    # 플레이어 데이터 조회 (type='player'로 표시)
+    cur.execute("SELECT username, bankroll, 'player' as type FROM users")
+    players = [(name, bankroll, 'player') for name, bankroll, _ in cur.fetchall()]
+    
+    # NPC 데이터 조회 (type='npc'로 표시)
+    cur.execute("SELECT name, bankroll, 'npc' as type FROM npcs")
+    npcs = [(name, bankroll, 'npc') for name, bankroll, _ in cur.fetchall()]
+    
+    # 모든 데이터 합치고 bankroll 기준으로 정렬
+    all_rankings = players + npcs
+    all_rankings.sort(key=lambda x: x[1], reverse=True)  # bankroll 기준 내림차순 정렬
+    
+    # 상위 10명만 반환
+    return all_rankings[:10]
+
+
+def get_npc_bankroll(conn, npc_name: str) -> Optional[int]:
+    """NPC의 잔액을 조회합니다.
+
+    Args:
+        conn: 데이터베이스 커넥션 객체
+        npc_name: NPC 이름
+
+    Returns:
+        int | None: NPC의 잔액 또는 None (NPC가 존재하지 않는 경우)
+    """
+    cur = conn.cursor()
+    cur.execute("SELECT bankroll FROM npcs WHERE name=?", (npc_name,))
+    result = cur.fetchone()
+    return result[0] if result else None
+
+
+def update_npc_bankroll(conn, npc_name: str, new_amount: int):
+    """NPC의 잔액을 업데이트합니다.
+
+    Args:
+        conn: 데이터베이스 커넥션 객체
+        npc_name: NPC 이름
+        new_amount: 새로 설정할 잔액
+    """
+    cur = conn.cursor()
+    cur.execute("UPDATE npcs SET bankroll=? WHERE name=?", (new_amount, npc_name))
+    conn.commit()
+
+
+def get_all_npcs(conn) -> List[Tuple[str, str, int]]:
+    """모든 NPC의 정보를 조회합니다.
+
+    Args:
+        conn: 데이터베이스 커넥션 객체
+
+    Returns:
+        list[tuple]: (name, npc_type, bankroll) 튜플이 담긴 리스트
+    """
+    cur = conn.cursor()
+    cur.execute("SELECT name, npc_type, bankroll FROM npcs")
     return cur.fetchall()
 
